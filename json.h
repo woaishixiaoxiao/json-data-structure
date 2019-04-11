@@ -9,7 +9,7 @@
  *  4. 怎么设计API，会让用户用起来更爽？
  *  5. 怎么设计API，会让这些API更容易调试、测试？
  */
-
+#define MAX_NUM 2000
 typedef enum json_e {
     JSON_NONE,
     JSON_BOL,
@@ -78,6 +78,8 @@ BOOL json_get_bool(const JSON *json, const char *key);
  */
 const char *json_get_str(const JSON *json, const char *key, const char *def);
 
+
+
 //  想想: 如果对应的键已经存在该怎么办，如果不存在该怎么办？要不要提供一个json_add_xxx版本的分别应对这两种场景？
 BOOL json_set_int(JSON *json, const char *key, int val);
 BOOL json_set_bool(JSON *json, const char *key, BOOL val);
@@ -101,6 +103,10 @@ JSON *json_add_index(JSON *json, U32 idx, JSON *val);
 
 //-----------------------------------------------------------------------------
 //  TODO: 增加你认为还应该增加的接口
+//自定义的函数为了得到字符串类型的值
+void json_encode_obj(const JSON *json, const char *def, char *arr_char);
+void json_encode_arr(value *val, char *res);
+void encode_value(value *val, char *pre_val, int *pre_val_index);
 //-------------------------------------------
 //
 //1. 增加键值对；
