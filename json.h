@@ -32,7 +32,7 @@ typedef struct value JSON;
  *  
  *  \details 要求json是个对象类型
  */
-const JSON *json_get_member(const JSON *json, const char *key);
+const JSON *json_get_member(const JSON *json, const char *key, bool &is_exist);
 /**
  *  \brief 从数组类型的json中获取索引为idx的值
  *      
@@ -97,7 +97,7 @@ JSON *json_new_str(const char *str);
 //const JSON *json_get_member(const JSON *json, const char *key);
 //const JSON *json_get_index(const JSON *json, U32 idx);
 //  想想：val应该是堆分配，还是栈分配？如果json_add_member失败，该由谁来释放val？
-JSON *json_add_member(JSON *json, const char *key, JSON *val);
+void json_add_member(JSON *json, const char *key, JSON *val);
 JSON *json_add_index(JSON *json, U32 idx, JSON *val);
 
 

@@ -50,7 +50,6 @@ struct value {
 /**
  *
  */
-//无论json_new还是json_delete都是对于obj对象来说的
 JSON *json_new(json_e type)
 {
     JSON *json = (JSON *)calloc(1, sizeof(JSON));
@@ -61,12 +60,12 @@ JSON *json_new(json_e type)
 		case JSON_BOL : json->bol = false;  break;
 		case JSON_INT : json->num = 0;      break;
 		case JSON_STR : json->str = NULL;   break;
-		case JSON_OBJ : json->obj->kvs = NULL; break;
-		case JSON_ARR : json->elems =NULL; break;
+		case JSON_OBJ : json->obj->kvs = NULL; json->obj->count = 0; break;
+		case JSON_ARR : json->elems =NULL; json->obj->count = 0; break;
 	}
     return json;
 }
-
+//json_delete都是对于obj对象来说的
 void json_delete(JSON *obj)
 {
 	int num = obj->obj.count;
@@ -74,6 +73,7 @@ void json_delete(JSON *obj)
 	for(int i = 0; i < num; i++)
 	{
 		free(kvs[i].key);
+		kvs[i].key = NULL;
 		value_delete(kvs[i].val);
 		kvs[i] = NULL;
 	}
@@ -118,20 +118,28 @@ void value_delete(value *json)
 			break;
 		}
 	}
-	free(json);
+	if (json)
+		free(json);
 }
 //从json对象中根据关键字提取出来值
-const JSON *json_get_member(const JSON *json, const char *key)
+const JSON *json_get_member(const JSON *json, const char *key, bool &is_exist)
 {
     U32 i;
     assert(json);
     if (json->type != JSON_OBJ)
+	{
+		is_exist = false;
         return NULL;
-    assert(json->obj.count == 0 || json->obj.kvs);
+	}
+    assert(json->obj.count == 0);
     for (i = 0; i < json->obj.count; ++i) {
         if (strcmp(json->obj.kvs[i].key, key) == 0)
+		{
+			is_exist = true;
             return json->obj.kvs[i].val;
+		}
     }
+	is_exist = false;
     return NULL;
 }
 
@@ -139,7 +147,8 @@ const JSON *json_get_member(const JSON *json, const char *key)
 //对于值类型为int型的。
 int json_get_int(const JSON *json, const char *key, int def) 
 {
-	const JSON * val = json_get_member(json, key);
+	bool is_exist;
+	const JSON * val = json_get_member(json, key, &is_exist);
 	if(val == NULL || val->type != JSON_INT)
 		return def;
 	return val->num;
@@ -148,7 +157,8 @@ int json_get_int(const JSON *json, const char *key, int def)
 //值类型为bool
 BOOL json_get_bool(const JSON *json, const char *key);
 {
-	const JSON * val = json_get_member(json, key);
+	bool is_exist;
+	const JSON * val = json_get_member(json, key, &is_exist);
 	if(val == NULL || val->type != JSON_BOL)
 		return false;
 	return val->bol;
@@ -167,7 +177,7 @@ void encode_value(value *val, char *pre_val, int *pre_val_index)
 		{
 			res[index++] = '\"';
 			strcpy(res + index, val->str)；
-			index = sizeof(*res);
+			index = strlen(res) + 1;
 			res[index - 1] = '\"';
 			res[index++] = '\0';
 			break;
@@ -200,7 +210,7 @@ void encode_value(value *val, char *pre_val, int *pre_val_index)
 	if( res ) {
 		//拼接后，在将结尾替换为','号
 		strcat(pre_val + *pre_val_index, res);
-		*pre_val_index = sizeof(*pre_val);
+		*pre_val_index = strlen(pre_val) + 1;
 		pre_val[*pre_val_index - 1] = ',';
 		free(res);
 	}
@@ -252,7 +262,7 @@ void json_encode_obj(const JSON *json, const char *def, char *arr_char)
 		assert(json->obj.kvs[i].key);
 		arr_char[index++] = '\"';
 		strcat(arr_char+index, json->obj.kvs[i].key);
-		index = sizeof(*arr_char);
+		index = strlen(arr_char) + 1;
 		arr_char[index - 1] = '\"';
 		arr_char[index++] = ':';
 		assert(json->obj.kvs[i].val);
@@ -266,10 +276,14 @@ void json_encode_obj(const JSON *json, const char *def, char *arr_char)
 //值类型为str 
 const char *json_get_str(const JSON *json, const char *key, const char *def)
 {
-	const JSON * val = json_get_member(json, key);
+	bool is_exist;
+	const JSON * val = json_get_member(json, key, &is_exist);
 	if(val == NULL)
 		return def;
-	char *res = malloc(sizeof(char) * MAX_NUM);
+	char *res = NULL;
+	res = malloc(sizeof(char) * MAX_NUM);
+	if(!res)
+		return def;
 	int index = 0;
 	encode_value(val, res, &index);
 	res[index - 1] = ',';
@@ -288,10 +302,192 @@ const JSON *json_get_index(const JSON *json, U32 idx)
     return json->arr.elems[idx];
 }
 
-BOOL json_set_int(JSON *json, const char *key, int val) 
+void arr_cpy(value *arr1, value *arr2)
 {
-	
+	assert(arr1 || arr2);
+	int sz = arr2->arr.count;
+	arr1->count = sz;
+	arr1->elems = malloc(sz * sizeof(value *));
+	for(int i = 0; i < sz; i++)
+	{
+		arr1->elems[i] = NULL;
+		depth_cpy(&(arr1->elems[i]), arr2->elems[i]);
+	}
 }
 
+void obj_cpy(value *obj1, value *obj2, int extra)
+{
+	assert(obj1 || obj2);
+	int sz = obj2->obj.count;
+	int key_sz;
+	obj1->obj.kvs = malloc(sz * sizeof(keyvalue) + extra);
+	obj1->obj.count = sz;
+	keyvalue *kvs1 = obj1->obj.kvs;
+	keyvalue *kvs2 = obj2->obj.kvs;
+	for(int i = 0; i < sz; i++)
+	{
+		key_sz = strlen(kvs2[i].key) + 1;
+		kvs1[i].key = malloc(key_sz * sizeof(char));
+		strcpy(kvs1[i].key, kvs2[i].key);
+		kvs1[i].val = NULL;
+		depth_cpy(&(kvs1[i].val), kvs2[i].val);
+	}
+}
+void depth_cpy(value **src, value *dst)
+{
+	if (!dst)return;
+	if (*src) {
+		value_delete(*src);
+		*src = NULL;
+	}
+	json_e type = dst->type;
+	switch(type)
+	{
+		case JSON_INT :
+		{
+			*src = json_new(type);
+			if(!(*src))
+				return;
+			(*src)->type = JSON_INT;
+			(*src)->num = dst->num;
+			break;
+		}
+		case JSON_BOL :
+		{
+			*src = json_new(type);
+			if(!(*src))
+				return;
+			(*src)->type = JSON_BOL;
+			(*src)->bol = dst->bol;
+			break;
+		}
+		case JSON_ARR :
+		{
+			*src = json_new(type);
+			if (!(*src))
+				return;
+			(*src)->type = JSON_ARR;
+			arr_cpy(*src, dst);
+			break;
+		}
+		case JSON_OBJ :
+		{
+			*src = json_new(type);
+			if (!(*src))
+				return;
+			(*src)->type = JSON_OBJ;
+			obj_cpy(*src, dst, 0);
+			break;
+		}
+		case JSON_STR :
+		{
+			*src = json_new(type);
+			if(!(*src))
+				return;
+			(*src)->type = JSON_STR;
+			int sz = strlen(dst->str);
+			char *str = malloc(sizeof(char) * sz);
+			strcpy(str, dst->str);
+			(*src)->str = str;
+			break;
+		}
+	}
+	
+}
+bool expand(JSON *json, int extra)
+{
+	JSON *new = json_new(JSON_OBJ);
+	new->obj.kvs = json->obj.kvs;
+	json->obj.kvs= NULL;
+	obj_cpy(json, new, 1);
+	json_delete(new);
+}
+void json_add_member(JSON *json, const char *key, JSON *val)
+{
+	expand(json, 1);
+	int sz = strlen(key) + 1;
+	json->obj.kvs[count].key = malloc(sizeof(char) * sz);
+	strcpy(json->obj.kvs[count].key, key);
+	json->obj.kvs[count].value = val;
+	json->obj.count = json->obj.count + 1;
+}
+bool json_set_value(JSON *json, const char *key, void *val, json_e type)
+{
+	bool is_exist = false;
+	const JSON * json_val_old = json_get_member(json, key, &is_exist);
+	if (json_val_old)
+		value_delete(json_val_old);
+	value * json_val_new = json_new(type);
+	if (!json_val_new)
+		return false;
+	switch(type)
+	{
+		case JSON_INT :
+		{
+			int num = *(int *)val;
+			json_val_new->type = JSON_INT;
+			json_val_new->num = num;
+			break;
+		}
+		case JSON_BOL :
+		{
+			bool bol = *(bool *)val;
+			json_val_new->type = JSON_BOL;
+			json_val_new->bol = bol;
+			break;
+		}
+		case JSON_STR :
+		{
+			char *str = char(*)val;
+			json_val_new->type = JSON_STR;
+			json_val_new->str = str;
+			break;
+		}
+		case JSON_ARR :
+		{
+			array arr = *(array *)val;
+			json_val_new->type = JSON_ARR;
+			depth_cpy(&json_val_new, json_val_old);
+			break;
+		}
+		case JSON_OBJ :
+		{
+			object obj = *(object *)val;
+			json_val_new->type = JSON_OBJ;
+			depth_cpy(&json_val_new, json_val_old);
+			break;
+		}
+	}
+	if (is_exist)
+	{
+		json_val_old = json_val_new;
+		return ture;
+	}else {
+		json_add_member(json, key, json_val_new);
+	}
+}
+booL json_set_int(JSON *json, const char *key, int val) 
+{
+	bool is_success = false;
+	is_success = json_set_value(json, key, (void*)&val, JSON_INT);
+	return is_success; 
+}
+bool json_set_obj(JSON *json, const char *key, value *obj)
+{
+	bool is_success = false;
+	is_success = json_set_value(json, key, (void*)obj, JSON_OBJ);
+	return is_success;
+}
 
+int main()
+{
+	json_e type = JSON_OBJ;
+	json * json_val = json_new(type);
+	if( json_set_int(json_val, "shi", 123) )
+	{
+		value_delete(json_val);
+		return 1;
+	}		
+	
+}
 
