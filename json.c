@@ -22,6 +22,9 @@ struct keyvalue {
 /**
  *  想想：如果要提升内存分配效率，这个结构体该作什么变化？
  */
+ 
+//提高内存分配效率可以一个变量capacity，表示容纳的能力>=count。当count == capacity的时候才
+//需要重新分配内存下面object一样
 struct array {
     value **elems;      /* 想想: 这里如果定义为'value *elems'会怎样？ */
     U32 count;
@@ -488,6 +491,5 @@ int main()
 		value_delete(json_val);
 		return 1;
 	}		
-	
 }
 
