@@ -57,7 +57,7 @@ const JSON *json_get_index(const JSON *json, U32 idx)
  *  4. 对于OBJ，初始化为空对象
  *  5. 对于ARR，初始化为空数组
  */
-JSON *json_new(json_e type);
+JSON *json_value_new(json_e type);
 
 //-----------------------------------------------------------------------------
 //  方案1

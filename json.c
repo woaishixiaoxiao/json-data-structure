@@ -42,7 +42,7 @@ struct value {
     json_e type;
     union {
         int num;
-        BOOL bol;
+        bool bol;
         char *str;
         array arr;
         object obj;
@@ -53,7 +53,7 @@ struct value {
 /**
  *
  */
-JSON *json_new(json_e type)
+JSON *json_value_new(json_e type)
 {
     JSON *json = (JSON *)calloc(1, sizeof(JSON));
     if (!json)
@@ -348,7 +348,7 @@ void depth_cpy(value **src, value *dst)
 	{
 		case JSON_INT :
 		{
-			*src = json_new(type);
+			*src = json_value_new(type);
 			if(!(*src))
 				return;
 			(*src)->type = JSON_INT;
@@ -357,7 +357,7 @@ void depth_cpy(value **src, value *dst)
 		}
 		case JSON_BOL :
 		{
-			*src = json_new(type);
+			*src = json_value_new(type);
 			if(!(*src))
 				return;
 			(*src)->type = JSON_BOL;
@@ -366,7 +366,7 @@ void depth_cpy(value **src, value *dst)
 		}
 		case JSON_ARR :
 		{
-			*src = json_new(type);
+			*src = json_value_new(type);
 			if (!(*src))
 				return;
 			(*src)->type = JSON_ARR;
@@ -375,7 +375,7 @@ void depth_cpy(value **src, value *dst)
 		}
 		case JSON_OBJ :
 		{
-			*src = json_new(type);
+			*src = json_value_new(type);
 			if (!(*src))
 				return;
 			(*src)->type = JSON_OBJ;
@@ -384,7 +384,7 @@ void depth_cpy(value **src, value *dst)
 		}
 		case JSON_STR :
 		{
-			*src = json_new(type);
+			*src = json_value_new(type);
 			if(!(*src))
 				return;
 			(*src)->type = JSON_STR;
@@ -399,7 +399,7 @@ void depth_cpy(value **src, value *dst)
 }
 bool expand(JSON *json, int extra)
 {
-	JSON *new = json_new(JSON_OBJ);
+	JSON *new = json_value_new(JSON_OBJ);
 	new->obj.kvs = json->obj.kvs;
 	json->obj.kvs= NULL;
 	obj_cpy(json, new, 1);
@@ -420,7 +420,7 @@ bool json_set_value(JSON *json, const char *key, void *val, json_e type)
 	const JSON * json_val_old = json_get_member(json, key, &is_exist);
 	if (json_val_old)
 		value_delete(json_val_old);
-	value * json_val_new = json_new(type);
+	value * json_val_new = json_value_new(type);
 	if (!json_val_new)
 		return false;
 	switch(type)
@@ -485,7 +485,7 @@ bool json_set_obj(JSON *json, const char *key, value *obj)
 int main()
 {
 	json_e type = JSON_OBJ;
-	json * json_val = json_new(type);
+	json * json_val = json_value_new(type);
 	if( json_set_int(json_val, "shi", 123) )
 	{
 		value_delete(json_val);
