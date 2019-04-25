@@ -2,7 +2,8 @@
 #define JSON_NEW_H
 typedef enum {
     JSON_NONE,
-    JSON_BOL,
+    JSON_TRUE,
+	JSON_FALSE,
     JSON_STR,
     JSON_ARR,
     JSON_OBJ,
@@ -20,7 +21,7 @@ typedef struct {
 }lept_value;
 
 //定义错误值，让我们容易定位错误。
-enum {
+type enum {
     LEPT_PARSE_OK = 0,
     LEPT_PARSE_EXPECT_VALUE,
     LEPT_PARSE_INVALID_VALUE,
@@ -35,8 +36,9 @@ enum {
     LEPT_PARSE_MISS_KEY,
     LEPT_PARSE_MISS_COLON,
     LEPT_PARSE_MISS_COMMA_OR_CURLY_BRACKET
-};
+}resId;
 typedef unsigned int BOOL;
 typedef unsigned int U32;
-int lept_parse_value(lept_value *, const char *);//这个是对外的接口，在这个函数中会根据const char *类型调用不同的接口
+int lept_parse(lept_value *, const char *);//这个是对外的接口，在这个函数中会根据const char *类型调用不同的接口
+json_e lept_get_type(lept_value);
 #endif
