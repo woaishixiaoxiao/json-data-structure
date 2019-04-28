@@ -17,8 +17,9 @@ static int test_pass  = 0;
 		}\
 	}while(0)   //这里没有加;号 是要在后面加
 
-#define EXPECT_EQ_INT(expect, actual) EXPECT_EQ_BASE(expect==actual, expect, actual, %d);
-#define EXPECT_EQ_DOUBLE(expect, actual) EXPECT_EQ_BASE(expect==actual, expect, actual, %f);
+#define EXPECT_EQ_INT(expect, actual) EXPECT_EQ_BASE(expect==actual, expect, actual, %d)
+#define EXPECT_EQ_DOUBLE(expect, actual) EXPECT_EQ_BASE(expect==actual, expect, actual, %f)
+#define EXPECT_EQ_STRING(expect, ptr, len) EXPECT_EQ_BASE(strncmp(expect, ptr, len), expect, ptr, %s)
 
 //这里可以定义变量，因为用do{}while包围起来的作用域
 #define TEST_NUMBER(expect, json_num) \
@@ -27,6 +28,14 @@ static int test_pass  = 0;
 		EXPECT_EQ_INT(LEPT_PARSE_OK, lept_value(&val_number, json_num));\
 		EXPECT_EQ_DOUBLE(expect, lept_get_number(val_number));\
 		EXPECT_EQ_INT(JSON_NUM, lept_get_type(val_number));\
+	}while(0)
+		
+#define TEST_STRING(expect, json_str) \
+	do { \
+		lept_value val_str;\
+		EXPECT_EQ_INT(LEPT_PARSE_OK, lept_value(&val_str, json_str));\
+		EXPECT_EQ_STRING(expect, lept_get_string(val_str), lept_get_string_len(val_str));\
+		EXPECT_EQ_INT(JSON_STR, lept_get_type(val_str));\
 	}while(0)
 		
 #define TEST_ERROR(error, json_val)\
@@ -89,6 +98,9 @@ static void test_parse_number() {
 	TEST_NUMBER(123, "123");
 }
 
+static void test_parse_string() {
+	TEST_STRING("abc", "abc");
+}
 static void test_parse() {
 	test_parse_null();
 	test_parse_bol();
@@ -96,7 +108,7 @@ static void test_parse() {
 	test_parse_expect_val();
 	test_parse_root_not_singular();
 }
-
+//写关于set_string 以及 access_string的单元测试 还有加上get_number 函数
 int main(int argc, char* argv[])
 {
 	test_parse();
