@@ -22,8 +22,8 @@ static int   lept_parse_literal(lept_value *, lept_context *);
 static int   lept_parse_string(lept_value *, lept_context *);
 static void *context_push(lept_context *text, size_t len);
 static void *context_pop(lept_context *text, size_t len);
-static char *lept_parse_hex4(char *, int *);
-static char *lept_encode_UTF8(lept_context *, int);
+static char *lept_parse_hex4(char *, unsigned *);
+static char *lept_encode_UTF8(lept_context *, unsigned);
 json_e lept_get_type(lept_value val) {
 	return val.type;
 }
@@ -167,11 +167,65 @@ static void *context_pop(lept_context *text, size_t len) {
 	return text->stack += (text->top -= len);
 }
 
-static char *lept_parse_hex4(char *p, int *u) {
+static char *lept_parse_hex4(char *p, unsigned *u) {
 	assert(p != NULL && u != NULL);
+	*u = 0;
+	size_t sz = 4, i;
+	for(i = 0; i < sz; i++) {
+		/*
+		本来想先检测合法性在用sscanf(p, "%x",&n) 这样写太垃圾了,
+		if( p[i] != '\0' && ( p[i] <= '9' && p[i] >= '0') || (p[i] <= 'F' && p[i] >= 'A') || (p[i] <= 'f' && p[i] >= 'a') ) {
+			p++
+		}else {
+			return NULL;
+		}
+		*/
+		char c = *p++; //之前所有的都是用的*p++ 这里保持原样，一是减少错误，二是代码写的好看
+		*u <<= 4；		
+		if(c >= '0' && c <= '9') *u |= (c - '0'); 
+		else if(c >= 'a' && c <= 'f') *u |= (c - 'a' + 10);
+		else if(c >= 'A' && c <= 'F') *u |= (c - 'A' + 10);
+		else return NULL;
+	}
+	return p;
 }
-static char *lept_encode_UTF8(lept_context *text, int u) {
-	
+static char *lept_encode_UTF8(lept_context *text, unsigned u) {
+	assert(text != NULL);
+	char c;
+	/*这里没必要判断两个，只要判断右边就行了
+	if(u >= 0 && u <= 0x7F) {
+		c = u
+		PUTC(text, )
+	}else if(u >= 0x80 && u <= 0x7FF) {
+		c = (char)((u >> 6) | 0xc0);
+		PUTC(text, c);
+		c = (char)()
+	}else if(u >= 0x800 && u <= 0xFFFF){
+		c = (char);
+		PUTC(text, (u >> 12) & 0xFF) | 0xE0);
+		c = (char)((u >> 6 ) & 0x3F) | 0x80);
+		PUTC(text, c);
+		c = (char)((u >> 0 ) & 0x3F) | 0x80);
+		PUTC(text, c);
+	}else if(u >= 0x10000 && u <= 0x10FFFF) {
+	}else {
+	}*/
+	if(u <= 0x7F) {
+		PUTC(text, ((u >> 0) & 0xFF);
+	}else if(u <= 0X7FF) {
+		PUTC(text, ((u >>  6) & 0xFF) | 0XC0);
+		PUTC(text, ((u >>  0) & 0x3F) | 0xE0);
+	}else if(u <= 0xFFFF) {
+		PUTC(text, ((u >> 12) & 0xFF) | 0xE0);
+		PUTC(text, ((u >>  6) & 0x3F) | 0x80);
+		PUTC(text, ((u >>  0) & 0x3F) | 0x80);
+	}else if(u <= 0x10FFFF) {
+		PUTC(text, ((u >> 18) & 0xFF) | 0xF0);
+		PUTC(text, ((u >> 12) & 0x3F) | 0x80);
+		PUTC(text, ((u >>  6) & 0x3F) | 0x80);
+		PUTC(text, ((u >>  0) & 0x3F) | 0x80);
+	}else {
+	}
 }
 
 /*
@@ -231,17 +285,34 @@ static int lept_parse_string(lept_value *val, lept_context *text) {
 					case 'r'  : PUTC(text, '\r');
 					case '\\' : PUTC(text, '\\');
 					case '/'  : PUTC(text, '/');
-					case 'U'  : {
+					case 'u'  : {
 						/*\UXXXX,指的是unicode的码点，XXXX表示0xXXXX。unicode收集好多国家的字符统一码点，
 						码点范围为0~0x10FFFF。另外还规定了存储码点的方式，并产生了UTF-8 UTF-16编码方式
 						\UXXXX，最多能表示0~0XFFFF。大于0XFFFF的码点用两个\UXXXX\UXXXX来表示，他们之间有
 						映射函数。
 						*/
-						int u = 0;
-						lept_parse_hex4();
-						if()
+						unsigned int high = 0;
+						unsigned int low = 0;
+						if((p = lept_parse_hex4(p, &high)) == NULL) {
+							STRING_ERROR(LEPT_PARSE_INVALID_UNICODE_HEX);
+						}
+						if(high >= 0xD800 && high <= 0xD8FF) {
+							if(*p == '\\' && *(p+1) == 'u') {
+								p += 2;
+								if((p = lept_parse_hex4(p, &low)) == NULL) {
+									STRING_ERROR(LEPT_PARSE_INVALID_UNICODE_HEX);
+								}
+								if(low < 0xDC00 || low > 0xDFFF) {
+									STRING_ERROR(LEPT_PARSE_INVALID_UNICODE_SURROGATE);
+								}
+								//u = 0x10000 + (high − 0xD800) × 0x400 + (low − 0xDC00)这样直接写不太好
+								//high减去之后就剩下低8位了  low也一样 将乘法变为转移后在进行按位与操作也可以
+								high = (((high - 0xD800) << 10) | (low - 0xDC00)) + 0x10000;
+							}
+						}
+						lept_encode_UTF8(text, high);
+						break;
 					}
-					break;
 				}
 			}
 			case '\0'  : { //出现这个说明是有问题的。
