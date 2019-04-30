@@ -9,9 +9,10 @@ typedef struct {
 }lept_context;
 
 
-#defined EXPECT(text, ch) do{ assert((text)->json==(ch));(text)->json++;}while(0)
-#defined PUTC(text, ch) context_push(text, ch ,1)
-	
+#define EXPECT(text, ch)    do{ assert((text)->json==(ch));(text)->json++;}while(0)
+#define PUTC(text, ch)      do{*(char *)context_push(text, sizeof(char)) = ch;}while(0)
+#define PUTS(text, str)     do{strncpy(context_push(text, len), str, len);}while(0)
+#define STRING_ERROR(error) do{text->top = head;return error;}while(0)
 static int   lept_parse_null(lept_value *, lept_context *);//想将一个函数固定到某一个源文件中一是不要写到头文件中二是声明为static
 static int   lept_parse_true(lept_value *, lept_context *);
 static int   lept_parse_false(lept_value *, lept_context *);
@@ -19,9 +20,10 @@ static void  extract_val(lept_context *);
 static void  lept_parse_number(lept_value *, lept_context *);
 static int   lept_parse_literal(lept_value *, lept_context *);
 static int   lept_parse_string(lept_value *, lept_context *);
-static void  *context_push(lept_context *text, size_t len);
-static void  *context_pop(lept_context *text, size_t len);
-
+static void *context_push(lept_context *text, size_t len);
+static void *context_pop(lept_context *text, size_t len);
+static char *lept_parse_hex4(char *, int *);
+static char *lept_encode_UTF8(lept_context *, int);
 json_e lept_get_type(lept_value val) {
 	return val.type;
 }
@@ -131,9 +133,20 @@ int lept_parse_number(lept_value *val, lept_context *text) {
 	text->json = endpoint;
 	return LEPT_PARSE_OK;
 }
+
+void lept_set_number(lept_value *val, const double n) {
+	assert(val != NULL);
+	val->type = JSON_ARR;
+	val->u.num = n;
+}
+
 //编写stack_push和stack_pop两个函数的时候，不用考虑lept_value_string怎么实现，编写通用型
-void *context_push(lept_context *text, const char *str, size_t len) {  //返回栈顶指针
+//这样写不太好，要是压入字符，还要传入参字符的指针，可以省略第二个参数，在函数中将栈顶更新，
+//但是返回的是旧的栈顶，在写两个辅助的宏函数，对栈赋值
+//static void *context_push(lept_context *text, const char *str, size_t len) { 
+static void *context_push(lept_context *text, size_t len) {
 	assert(text!=NULL && len > 0);
+	void *ret;
 	int i;
 	if( (text->top + len) > text->sz ) {  
 		if(text->top == 0) {    //这里要有这个判断并且给text->top赋值的原因是 text->sz += (text->sz >> 1)
@@ -144,17 +157,55 @@ void *context_push(lept_context *text, const char *str, size_t len) {  //返回�
 		}
 		text->stack = (char *)realloc( (void*)text->stack, text->sz );  //注意这里第一个参数可以为NULL，所以初始化很重要
 	}
-	strncpy(text->stack+text->top, str, len);
+	ret = text->stack + text->top;
 	text->top += len;
-	return (void *)(text->stack + text->top);
+	return ret;
 }
 
-void *context_pop(lept_context *text, size_t len) {  
+static void *context_pop(lept_context *text, size_t len) {  
 	assert(text != NULL && len > 0 && text->top >= len);
 	return text->stack += (text->top -= len);
 }
 
-int lept_parse_string(lept_value *val, lept_context *text) {
+static char *lept_parse_hex4(char *p, int *u) {
+	assert(p != NULL && u != NULL);
+}
+static char *lept_encode_UTF8(lept_context *text, int u) {
+	
+}
+
+/*
+string = quotation-mark *char quotation-mark
+char = unescaped /
+   escape (
+       %x22 /          ; "    quotation mark  U+0022
+       %x5C /          ; \    reverse solidus U+005C
+       %x2F /          ; /    solidus         U+002F
+       %x62 /          ; b    backspace       U+0008
+       %x66 /          ; f    form feed       U+000C
+       %x6E /          ; n    line feed       U+000A
+       %x72 /          ; r    carriage return U+000D
+       %x74 /          ; t    tab             U+0009
+       %x75 4HEXDIG )  ; uXXXX                U+XXXX
+escape = %x5C          ; \
+quotation-mark = %x22  ; "
+unescaped = %x20-21 / %x23-5B / %x5D-10FFFF
+以"作为开头以及结尾，中间包含转义字符以及非转义字符
+转移字符包含上面九种。非转义字符包含的码点范围是0x20-21 0x23-5B 0x5D-10FFFF
+码点指的是Unicode编码。不包含0X22 以及0X5C  这两个分别是" \
+注意json中 \"和" 以及 \和\\的区别。因为json是文本格式，存在文件或者网络字节流中。
+我们将json文本格式放到char *中保存，char *中的所有字符均是普通字符，没有任何转义含义的。
+通常保存json文本的编码格式为UTF-8，我们将json字符串也解析为UTF-8编码方式，最后得到的解析结果是
+UTF-8编码的字节流。我们得到下述转换规则
+1、对于转义字符
+除了\UXXXX 均转化了ASCII编码方式。
+对于\UXXXX或者\UXXXX\UXXXX，我们将其先转化为Unicode码点，然后在根据UTF-8编码格式将码点转化为
+字节流。
+2、对于非转义字符
+我们直接将非转义字符的字节流保存到解析结果中去。因为json文本是UTF-8编码的，可能会存在几个字节流表示一个字符的情况，
+我们直接将这些字节流按顺序放到解析中去就好了
+*/
+static int lept_parse_string(lept_value *val, lept_context *text) {
 	assert(val!=NULL && text!=NULL);
 	size_t head = text->top, len;
 	EXPECT(text, '\"');
@@ -163,13 +214,52 @@ int lept_parse_string(lept_value *val, lept_context *text) {
 	for(;;) {
 		c = *p++;
 		switch(c) {
-			case '\"': {
+			case '"'   : { //注意这里写不写\"都行，加\是因为表示不了，比如在char *s ="\"sf","必须要用\转义才可以
 				len = text->top - head;
 				lept_set_val_str(val, json, context_pop(text, len), len);
 				text->json = p;
 				return LEPT_PARSE_OK;
 			}
-			default  : {
+			case '\\'  : { //这里就必须用\将'引起来 到了这里，意味这出现转义字符了。
+				c=*p++;
+				switch(c) {
+					case '"'  : PUTC(text, '\"');
+					case 't'  : PUTC(text, '\t');
+					case 'b'  : PUTC(text, '\b');
+					case 'f'  : PUTC(text, '\f');
+					case 'n'  : PUTC(text, '\n');
+					case 'r'  : PUTC(text, '\r');
+					case '\\' : PUTC(text, '\\');
+					case '/'  : PUTC(text, '/');
+					case 'U'  : {
+						/*\UXXXX,指的是unicode的码点，XXXX表示0xXXXX。unicode收集好多国家的字符统一码点，
+						码点范围为0~0x10FFFF。另外还规定了存储码点的方式，并产生了UTF-8 UTF-16编码方式
+						\UXXXX，最多能表示0~0XFFFF。大于0XFFFF的码点用两个\UXXXX\UXXXX来表示，他们之间有
+						映射函数。
+						*/
+						int u = 0;
+						lept_parse_hex4();
+						if()
+					}
+					break;
+				}
+			}
+			case '\0'  : { //出现这个说明是有问题的。
+				STRING_ERROR(LEPT_PARSE_MISS_QUOTATION_MARK);
+			}
+			default    : { 
+				//unescaped = %x20-21 / %x23-5B / %x5D-10FFFF，这个范围之外的都是不合法的。因为我们上面处理了0x22以及0x5c
+				//这里只要比0x20小就行了。char是unsigned char还是signed char看编译器的实现，如果是signed char保存不了>127
+				//的整数,但是强制转换成unsigned char肯定是>127的，所以无论编译器如果解析char，下面的判断表达式都可以找出
+				//无效的非转义字符
+				if((unsigned char)c < 0x20) {
+					/*只要json字符串不合法，都会有执行下面两个语句，text->top=head是固定的，但是错误码不一定
+					将这两个语句组成宏,这个宏并没有传递text以及head的参数，因为是固定的，只传递了错误码。所以这个宏只限于此函数中使用
+					text->top = head;
+					return LEPT_PARSE_INVALID_STRING_CHAR;
+					*/
+					STRING_ERROR(LEPT_PARSE_INVALID_STRING_CHAR);
+				}
 				PUTC(text, c);
 			}
 		}

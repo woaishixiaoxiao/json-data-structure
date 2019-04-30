@@ -33,7 +33,7 @@ static int test_pass  = 0;
 #define TEST_STRING(expect, json_str) \
 	do { \
 		lept_value val_str;\
-		EXPECT_EQ_INT(LEPT_PARSE_OK, lept_value(&val_str, json_str));\
+		EXPECT_EQ_INT(LEPT_PARSE_OK, lept_value_parse(&val_str, json_str));\
 		EXPECT_EQ_STRING(expect, lept_get_string(val_str), lept_get_string_len(val_str));\
 		EXPECT_EQ_INT(JSON_STR, lept_get_type(val_str));\
 	}while(0)
@@ -101,6 +101,13 @@ static void test_parse_number() {
 static void test_parse_string() {
 	TEST_STRING("abc", "abc");
 }
+
+static void test_access_base(lept_value val, ) {
+	
+}
+static void test_access_string() {
+	
+}
 static void test_parse() {
 	test_parse_null();
 	test_parse_bol();
@@ -108,7 +115,7 @@ static void test_parse() {
 	test_parse_expect_val();
 	test_parse_root_not_singular();
 }
-//写关于set_string 以及 access_string的单元测试 还有加上get_number 函数
+
 int main(int argc, char* argv[])
 {
 	test_parse();
