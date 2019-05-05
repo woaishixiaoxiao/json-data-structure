@@ -24,6 +24,7 @@ static void *context_push(lept_context *text, size_t len);
 static void *context_pop(lept_context *text, size_t len);
 static char *lept_parse_hex4(char *, unsigned *);
 static char *lept_encode_UTF8(lept_context *, unsigned);
+static int   lept_parse_string_raw(lept_value *, lept_context *, char *, size_t *);
 json_e lept_get_type(lept_value val) {
 	return val.type;
 }
@@ -212,19 +213,19 @@ static char *lept_encode_UTF8(lept_context *text, unsigned u) {
 	}*/
 	if(u <= 0x7F) {
 		PUTC(text, ((u >> 0) & 0xFF);
-	}else if(u <= 0X7FF) {
-		PUTC(text, ((u >>  6) & 0xFF) | 0XC0);
+	}else if(u <= 0x7FF) {
+		PUTC(text, ((u >>  6) & 0xFF) | 0xC0);
 		PUTC(text, ((u >>  0) & 0x3F) | 0xE0);
 	}else if(u <= 0xFFFF) {
 		PUTC(text, ((u >> 12) & 0xFF) | 0xE0);
 		PUTC(text, ((u >>  6) & 0x3F) | 0x80);
 		PUTC(text, ((u >>  0) & 0x3F) | 0x80);
-	}else if(u <= 0x10FFFF) {
+	}else {
+		assert(u <= 0x10FFFF);  //这里用assert因为是内部解析的
 		PUTC(text, ((u >> 18) & 0xFF) | 0xF0);
 		PUTC(text, ((u >> 12) & 0x3F) | 0x80);
 		PUTC(text, ((u >>  6) & 0x3F) | 0x80);
 		PUTC(text, ((u >>  0) & 0x3F) | 0x80);
-	}else {
 	}
 }
 
@@ -259,7 +260,7 @@ UTF-8编码的字节流。我们得到下述转换规则
 我们直接将非转义字符的字节流保存到解析结果中去。因为json文本是UTF-8编码的，可能会存在几个字节流表示一个字符的情况，
 我们直接将这些字节流按顺序放到解析中去就好了
 */
-static int lept_parse_string(lept_value *val, lept_context *text) {
+/*static int lept_parse_string(lept_value *val, lept_context *text) {
 	assert(val!=NULL && text!=NULL);
 	size_t head = text->top, len;
 	EXPECT(text, '\"');
@@ -270,7 +271,89 @@ static int lept_parse_string(lept_value *val, lept_context *text) {
 		switch(c) {
 			case '"'   : { //注意这里写不写\"都行，加\是因为表示不了，比如在char *s ="\"sf","必须要用\转义才可以
 				len = text->top - head;
-				lept_set_val_str(val, json, context_pop(text, len), len);
+				lept_set_val_str(val, json, context_pop(text, len), len);        //这里进行改写，函数专注于自己的功能，也就是低耦合。将赋值单独拿出来写成一个函数。
+				text->json = p;
+				return LEPT_PARSE_OK;
+			}
+			case '\\'  : { //这里就必须用\将'引起来 到了这里，意味这出现转义字符了。
+				c=*p++;
+				switch(c) {
+					case '"'  : PUTC(text, '\"');
+					case 't'  : PUTC(text, '\t');
+					case 'b'  : PUTC(text, '\b');
+					case 'f'  : PUTC(text, '\f');
+					case 'n'  : PUTC(text, '\n');
+					case 'r'  : PUTC(text, '\r');
+					case '\\' : PUTC(text, '\\');
+					case '/'  : PUTC(text, '/');
+					case 'u'  : {
+						/*\UXXXX,指的是unicode的码点，XXXX表示0xXXXX。unicode收集好多国家的字符统一码点，
+						码点范围为0~0x10FFFF。另外还规定了存储码点的方式，并产生了UTF-8 UTF-16编码方式
+						\UXXXX，最多能表示0~0XFFFF。大于0XFFFF的码点用两个\UXXXX\UXXXX来表示，他们之间有
+						映射函数。
+						*/
+						/*
+						unsigned int high = 0;
+						unsigned int low = 0;
+						if((p = lept_parse_hex4(p, &high)) == NULL) {
+							STRING_ERROR(LEPT_PARSE_INVALID_UNICODE_HEX);
+						}
+						if(high >= 0xD800 && high <= 0xD8FF) {
+							if(*p == '\\' && *(p+1) == 'u') {
+								p += 2;
+								if((p = lept_parse_hex4(p, &low)) == NULL) {
+									STRING_ERROR(LEPT_PARSE_INVALID_UNICODE_HEX);
+								}
+								if(low < 0xDC00 || low > 0xDFFF) {
+									STRING_ERROR(LEPT_PARSE_INVALID_UNICODE_SURROGATE);
+								}
+								//u = 0x10000 + (high − 0xD800) × 0x400 + (low − 0xDC00)这样直接写不太好
+								//high减去之后就剩下低8位了  low也一样 将乘法变为转移后在进行按位与操作也可以
+								high = (((high - 0xD800) << 10) | (low - 0xDC00)) + 0x10000;
+							}
+						}
+						lept_encode_UTF8(text, high);
+						break;
+					}
+				}
+			}
+			case '\0'  : { //出现这个说明是有问题的。
+				STRING_ERROR(LEPT_PARSE_MISS_QUOTATION_MARK);
+			}
+			default    : { 
+				//unescaped = %x20-21 / %x23-5B / %x5D-10FFFF，这个范围之外的都是不合法的。因为我们上面处理了0x22以及0x5c
+				//这里只要比0x20小就行了。char是unsigned char还是signed char看编译器的实现，如果是signed char保存不了>127
+				//的整数,但是强制转换成unsigned char肯定是>127的，所以无论编译器如果解析char，下面的判断表达式都可以找出
+				//无效的非转义字符
+				if((unsigned char)c < 0x20) {
+					/*只要json字符串不合法，都会有执行下面两个语句，text->top=head是固定的，但是错误码不一定
+					将这两个语句组成宏,这个宏并没有传递text以及head的参数，因为是固定的，只传递了错误码。所以这个宏只限于此函数中使用
+					text->top = head;
+					return LEPT_PARSE_INVALID_STRING_CHAR;
+					*/
+					/*
+					STRING_ERROR(LEPT_PARSE_INVALID_STRING_CHAR);
+				}
+				PUTC(text, c);
+			}
+		}
+	}
+}
+*/
+
+//对上述函数进行改写
+static int lept_parse_string_raw(lept_value *val, lept_context *text, char *str, size_t *len) {
+	assert(val!=NULL && text!=NULL && str!=NULL && len!=NULL);
+	size_t head = text->top, len;
+	EXPECT(text, '\"');
+	const char * p = text->json;
+	char c;
+	for(;;) {
+		c = *p++;
+		switch(c) {
+			case '"'   : { //注意这里写不写\"都行，加\是因为表示不了，比如在char *s ="\"sf","必须要用\转义才可以
+				*len = text->top - head;
+				str = context_pop(text, len);
 				text->json = p;
 				return LEPT_PARSE_OK;
 			}
@@ -311,9 +394,10 @@ static int lept_parse_string(lept_value *val, lept_context *text) {
 							}
 						}
 						lept_encode_UTF8(text, high);
-						break;
 					}
+					default   : return LEPT_PARSE_INVALID_STRING_ESCAPE;
 				}
+				break;
 			}
 			case '\0'  : { //出现这个说明是有问题的。
 				STRING_ERROR(LEPT_PARSE_MISS_QUOTATION_MARK);
@@ -335,6 +419,15 @@ static int lept_parse_string(lept_value *val, lept_context *text) {
 			}
 		}
 	}
+}
+
+static int lept_parse_string(lept_value *val, lept_context *text) {
+	char *str;
+	size_t len;
+	if( (ret = lept_parse_string_raw(val, text, str, &len)) == LEPT_PARSE_Ok ) {
+		lept_set_val_str(val, str, len);
+	}
+	return ret;
 }
 
 int lept_parse(lept_value *val, const char *json_val) { 

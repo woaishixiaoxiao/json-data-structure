@@ -29,13 +29,17 @@ static int test_pass  = 0;
 		EXPECT_EQ_DOUBLE(expect, lept_get_number(val_number));\
 		EXPECT_EQ_INT(JSON_NUM, lept_get_type(val_number));\
 	}while(0)
-		
+
+//在字符串这里引进了释放lept_value的操作，进行完一个测试后，该值就没有用了 我们将其释放掉
+//另外任何变量要考虑初始化 我们解析其他值包括true false number都要进行初始化以及释放操作
 #define TEST_STRING(expect, json_str) \
 	do { \
 		lept_value val_str;\
+		LEPT_INIT(val_str);\
 		EXPECT_EQ_INT(LEPT_PARSE_OK, lept_value_parse(&val_str, json_str));\
 		EXPECT_EQ_STRING(expect, lept_get_string(val_str), lept_get_string_len(val_str));\
 		EXPECT_EQ_INT(JSON_STR, lept_get_type(val_str));\
+		lept_free(&val_str);
 	}while(0)
 		
 #define TEST_ERROR(error, json_val)\
@@ -45,6 +49,16 @@ static int test_pass  = 0;
 		EXPECT_EQ_INT(JSON_NONE, lept_get_type(val));\
 	}while(0)
 
+#define TEST_ACCESS_STRING(str, len) \
+	do {\
+		lept_value val;\
+		LEPT_INIT(val);\
+		lept_set_val_str(val, str, len);\
+		EXPECT_EQ_STRING(str, lept_get_string(val));\
+		EXPECT_EQ_INT(len, lept_get_string_len(val));\
+		lept_free(&val);\
+	}while(0)
+
 static void test_parse_null() {
 	lept_value val_null;
 	//json值定义是  JSON-text = ws value ws  ws为单个或多个空格 制表 回车 换行组成的 所以要有提取value的一步
@@ -52,38 +66,13 @@ static void test_parse_null() {
 	EXPECT_EQ_INT(LEPT_PARSE_OK, lept_parse(&val_null, "null"));
 	EXPECT_EQ_INT(JSON_NONE, lept_get_type(val_null));
 }
+
 static void test_parse_bol() {
 	lept_value val_ture,val_false;
 	EXPECT_EQ_INT(LEPT_PARSE_OK, lept_parse(&val_true, "true"));
 	EXPECT_EQ_INT(JSON_TRUE, lept_get_type(val_true));
 	EXPECT_EQ_INT(LEPT_PARSE_OK, lept_parse(&val_false, "false"));
 	EXPECT_EQ_INT(JSON_FALSE, lept_get_type(val_false));
-}
-static void test_parse_invalid() {
-	TEST_ERROR(LEPT_PARSE_INVALID_VALUE, "dfs");
-	TEST_ERROR(LEPT_PARSE_INVALID_VALUE, "nul");
-	TEST_ERROR(LEPT_PARSE_INVALID_VALUE, "fals");
-	
-	TEST_ERROR(LEPT_PARSE_INVALID_VALUE, "+123");
-	TEST_ERROR(LEPT_PARSE_INVALID_VALUE, "0123");
-	TEST_ERROR(LEPT_PARSE_INVALID_VALUE, "12eab");
-}
-static void test_parse_number_beyond_limit() {
-	lept_value val_neg_min,val_neg_max,val_posi_min,val_posi_max;
-	EXPECT_EQ_INT(LEPT_PARSE_NUMBER_BEYOND_LIMIT, lept_parse(&val_neg_min, "-4.94065645841246544E-325"));//-324这两个谁大啊
-	EXPECT_EQ_INT(LEPT_PARSE_NUMBER_BEYOND_LIMIT, lept_parse(&val_neg_max, "-1.79769313486231570E+309"));//+308 
-	EXPECT_EQ_INT(LEPT_PARSE_NUMBER_BEYOND_LIMIT, lept_parse(&val_posi_min, "4.94065645841246544E-325"));
-	EXPECT_EQ_INT(LEPT_PARSE_NUMBER_BEYOND_LIMIT, lept_parse(&val_posi_max, "1.79769313486231570E+309"));
-
-}
-static void test_parse_expect_val() {
-	TEST_ERROR(LEPT_PARSE_EXPECT_VALUE, " ");
-	TEST_ERROR(LEPT_PARSE_EXPECT_VALUE, "");
-	TEST_ERROR(LEPT_PARSE_EXPECT_VALUE, "  \r\n");
-}
-static void test_parse_root_not_singular() {
-	TEST_ERROR(LEPT_PARSE_ROOT_NOT_SINGULAR, " null x");
-	TEST_ERROR(LEPT_PARSE_ROOT_NOT_SINGULAR, " false  a");
 }
 
 static void test_parse_number() {
@@ -99,21 +88,75 @@ static void test_parse_number() {
 }
 
 static void test_parse_string() {
-	TEST_STRING("abc", "abc");
+	TEST_STRING("abc", "\"abc\"");
+	TEST_STRING("abc\t", "\"abc\\t\"");
+	TEST_STRING("0xE20x820xACabc", "\"\\U20ACabc\"");
 }
 
-static void test_access_base(lept_value val, ) {
-	
-}
+
 static void test_access_string() {
-	
+	TEST_ACCESS_STRING("shixiaoxiao", 11);
+	TEST_ACCESS_STRING("0xEC0xBC", 8);
 }
+
+static void test_access_number() {
+	lept_value number;
+	lept_init(&number);
+	lept_set_string(&number, "shi", 3);
+	lept_set_number(&number, 123.345);
+	EXPECT_EQ_DOUBLE(123.345, lept_get_number(number));
+	lept_free(number);
+}
+static void test_parse_invalid() {
+	TEST_ERROR(LEPT_PARSE_INVALID_VALUE, "dfs");
+	TEST_ERROR(LEPT_PARSE_INVALID_VALUE, "nul");
+	TEST_ERROR(LEPT_PARSE_INVALID_VALUE, "fals");
+	
+	TEST_ERROR(LEPT_PARSE_INVALID_VALUE, "+123");
+	TEST_ERROR(LEPT_PARSE_INVALID_VALUE, "0123");
+	TEST_ERROR(LEPT_PARSE_INVALID_VALUE, "12eab");
+}
+
+static void test_parse_number_beyond_limit() {
+	lept_value val_neg_min,val_neg_max,val_posi_min,val_posi_max;
+	EXPECT_EQ_INT(LEPT_PARSE_NUMBER_BEYOND_LIMIT, lept_parse(&val_neg_min, "-4.94065645841246544E-325"));//-324这两个谁大啊
+	EXPECT_EQ_INT(LEPT_PARSE_NUMBER_BEYOND_LIMIT, lept_parse(&val_neg_max, "-1.79769313486231570E+309"));//+308 
+	EXPECT_EQ_INT(LEPT_PARSE_NUMBER_BEYOND_LIMIT, lept_parse(&val_posi_min, "4.94065645841246544E-325"));
+	EXPECT_EQ_INT(LEPT_PARSE_NUMBER_BEYOND_LIMIT, lept_parse(&val_posi_max, "1.79769313486231570E+309"));
+}
+
+static void test_parse_expect_val() {
+	TEST_ERROR(LEPT_PARSE_EXPECT_VALUE, " ");
+	TEST_ERROR(LEPT_PARSE_EXPECT_VALUE, "");
+	TEST_ERROR(LEPT_PARSE_EXPECT_VALUE, "  \r\n");
+}
+
+static void test_parse_root_not_singular() {
+	TEST_ERROR(LEPT_PARSE_ROOT_NOT_SINGULAR, " null x");
+	TEST_ERROR(LEPT_PARSE_ROOT_NOT_SINGULAR, " false  a");
+}
+
+static void test_parse_invalid_string_escape() {
+	TEST_ERROR(LEPT_PARSE_INVALID_STRING_ESCAPE, "\"\\v\"");
+    TEST_ERROR(LEPT_PARSE_INVALID_STRING_ESCAPE, "\"\\'\"");
+    TEST_ERROR(LEPT_PARSE_INVALID_STRING_ESCAPE, "\"\\0\"");
+    TEST_ERROR(LEPT_PARSE_INVALID_STRING_ESCAPE, "\"\\x12\"");
+}
+
+static void test_parse_invalid_unicode_surrogate() {
+	TEST_ERROR(LEPT_PARSE_INVALID_UNICODE_SURROGATE, "\"\\uD800\\uDBFF\"");
+    TEST_ERROR(LEPT_PARSE_INVALID_UNICODE_SURROGATE, "\"\\uD800\\uE000\"");
+}
+
 static void test_parse() {
 	test_parse_null();
 	test_parse_bol();
 	test_parse_invalid();
 	test_parse_expect_val();
 	test_parse_root_not_singular();
+	test_parse_number();
+	test_parse_string();
+	test_access_string();
 }
 
 int main(int argc, char* argv[])
