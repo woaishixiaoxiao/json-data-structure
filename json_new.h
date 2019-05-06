@@ -9,13 +9,14 @@ typedef enum {
     JSON_OBJ,
     JSON_NUM,
 } json_e;
+typedef struct lept_value lept_value;//前向声明
 typedef struct {
 	json_e type;
 	union {
 		double num;            
 		bool bol;
 		struct {char *str;size_t len}s;
-		array arr;
+		struct {lept_value *e, size_t sz}arr;
 		object obj;
 	}u;
 }lept_value;
@@ -32,6 +33,7 @@ typedef enum {
     LEPT_PARSE_INVALID_STRING_CHAR,
     LEPT_PARSE_INVALID_UNICODE_HEX,
     LEPT_PARSE_INVALID_UNICODE_SURROGATE,
+	LEPT_PARSE_ARRAY_OVERFLOW,
     LEPT_PARSE_MISS_COMMA_OR_SQUARE_BRACKET,
     LEPT_PARSE_MISS_KEY,
     LEPT_PARSE_MISS_COLON,
@@ -49,4 +51,6 @@ const char*  lept_get_string(const lept_value);
 size_t       lept_get_string_len(const lept_value);
 void         lept_set_val_str(lept_value *, const char *, size_t);
 void         lept_free(lept_value *);
+size_t       lept_get_array_size(lept_value);
+const lept_value * lept_get_array_elem(lept_value, size_t);  //相关get函数参数用指针比较好，因为避免参数赋值了 但是这里就不做修改了
 #endif

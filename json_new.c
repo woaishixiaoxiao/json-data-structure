@@ -16,7 +16,7 @@ typedef struct {
 static int   lept_parse_null(lept_value *, lept_context *);//想将一个函数固定到某一个源文件中一是不要写到头文件中二是声明为static
 static int   lept_parse_true(lept_value *, lept_context *);
 static int   lept_parse_false(lept_value *, lept_context *);
-static void  extract_val(lept_context *);
+static void  lept_parse_whitespace(lept_context *);
 static void  lept_parse_number(lept_value *, lept_context *);
 static int   lept_parse_literal(lept_value *, lept_context *);
 static int   lept_parse_string(lept_value *, lept_context *);
@@ -25,11 +25,12 @@ static void *context_pop(lept_context *text, size_t len);
 static char *lept_parse_hex4(char *, unsigned *);
 static char *lept_encode_UTF8(lept_context *, unsigned);
 static int   lept_parse_string_raw(lept_value *, lept_context *, char *, size_t *);
+static int   lept_parse_array(lept_value *, lept_context *);
 json_e lept_get_type(lept_value val) {
 	return val.type;
 }
 
-static void extract_val(lept_context *text) {   
+static void lept_parse_whitespace(lept_context *text) {   
 	assert(text!=NULL);
 	const char *p = text->json;
 	char c;
@@ -55,6 +56,7 @@ static int lept_parse_literal(lept_value *val, lept_context *text, const char *s
 	text->json = p;
 	return LEPT_PARSE_OK;
 }
+
 static int lept_parse_null(lept_value *val, lept_context *text) {
 	assert(val!=NULL && text!=NULL);
 	int ret = lept_parse_literal(val, text, "null", 4);
@@ -101,6 +103,7 @@ static int lept_parse_value(lept_val *val, lept_context *text) {
 		case '8'  :
 		case '9'  : return lept_parse_number(val, text);
 		case '\"' : return lept_parse_string(val, text);
+		case '['  : return lept_parse_array(val, text);
 		case '\0' : return LEPT_PARSE_EXPECT_VALUE;
 		default   : return LEPT_PARSE_INVALID_VALUE;
 	}
@@ -271,8 +274,8 @@ UTF-8编码的字节流。我们得到下述转换规则
 		switch(c) {
 			case '"'   : { //注意这里写不写\"都行，加\是因为表示不了，比如在char *s ="\"sf","必须要用\转义才可以
 				len = text->top - head;
-				lept_set_val_str(val, json, context_pop(text, len), len);        //这里进行改写，函数专注于自己的功能，也就是低耦合。将赋值单独拿出来写成一个函数。
-				text->json = p;
+				lept_set_val_str(val, json, context_pop(text, len), len);    //这里进行改写，函数专注于自己的功能，也就是低耦合。将赋值单独拿出来写成一个函数。
+				text->json = p;                          
 				return LEPT_PARSE_OK;
 			}
 			case '\\'  : { //这里就必须用\将'引起来 到了这里，意味这出现转义字符了。
@@ -353,7 +356,7 @@ static int lept_parse_string_raw(lept_value *val, lept_context *text, char *str,
 		switch(c) {
 			case '"'   : { //注意这里写不写\"都行，加\是因为表示不了，比如在char *s ="\"sf","必须要用\转义才可以
 				*len = text->top - head;
-				str = context_pop(text, len);
+				str = context_pop(text, *len);
 				text->json = p;
 				return LEPT_PARSE_OK;
 			}
@@ -437,12 +440,12 @@ int lept_parse(lept_value *val, const char *json_val) {
 	text.json = json_val;
 	text.stack = NULL;   //这里可以对栈进行初始化 但是不要分配空间
 	text.top = text.sz = 0;
-	extract_val(&text);
+	lept_parse_whitespace(&text);
 	//json值解析失败，我们也置为空，这里提前处理，后面解析函数中，失败了就不用考虑赋值为json_none了
 	LEPT_INIT(val);             
 	ret = lept_parse_value(val, &text);
 	if(ret == LEPT_PARSE_OK) {
-		extract_val(&text);
+		lept_parse_whitespace(&text);
 		if(*(text.json) != '\0') ret = LEPT_PARSE_ROOT_NOT_SINGULAR;
 	}
 	assert(text.top == 0);//解析完成之后，top应该为0了
@@ -457,6 +460,13 @@ void lept_free(lept_value *val) {
 		if(val->u.s.str) {   		//这个宏要写在头文件中。
 			u.s.len = 0;
 			free(val->u.s.str);
+		}
+	}else if(val->type === JOSN_ARR) {
+		if(val->u.arr.e) {
+			size_t i = 0;
+			for(i = 0; i < val->u.arr.sz; i++) {
+				lept_free(val->u.arr.e + i);
+			}
 		}
 	}
 	val->type == JSON_NONE;
@@ -481,3 +491,93 @@ size_t lept_get_string_len(const lept_value val) {
 	return val.u.s.len;
 }
 
+size_t lept_get_array_size(lept_value val) {
+	assert(val.type != JSON_ARR);
+	return val.u.arr.sz;
+}
+
+const lept_value * lept_get_array_elem(lept_value val, size_t index) {
+	assert(val.type != JSON_ARR && index >=0 && index < val.u.arr.sz);
+	return val.u.arr.e + index;
+}
+/*
+这样写有问题 可以看出来 [ ]这种方式的解析不了  所以先lept_parse_whitespace 然后判断下下一个字符是不是 ']'
+此时 初始化的时候先解析了空白，在循环中一开始就不要解析空白了，直接进行元素解析 并且每次解析完一个元素的时候需要继续解析空白，
+碰到 ,的时候还要在进行一次空白的解析。碰到 ]就结束了  其他的则报错。
+static int lept_parse_array(lept_value *val, lept_context *text) {
+	assert(val != NULL && text != NULL);
+	EXPECT(text, '[');
+	lept_value temp;
+	size_t sz = 0;
+	int ret;
+	for(;;) {
+		LEPT_INIT(temp);
+		lept_parse_whitespace(text);
+		if((ret=lept_parse_value(&temp, text)) != LEPT_PARSE) {
+			break;
+		}
+		lept_parse_whitespace(text);
+		memcpy(context_push(text, sizeof(lept_value)), (void *)&temp, sizeof(lept_value));
+		sz++;
+		//lept_free(&temp);这里不能释放这个变量，要是释放掉了，那字符串会出问题。在lept_free中添加释放数组的逻辑
+		if(*text->json == ',') {
+			text->json++;
+		}else if(*text->json == ']') {
+			text->json++;
+			val->type = JSON_ARR;
+			val->u.arr.sz = sz;
+			val->u.arr.e = (lept_value *)malloc(sizeof(lept_value) * sz);
+			total_ = text->top - head;
+			memcpy((void *)val->u.arr.e, context_pop(text, ), total_len);
+			return LEPT_PARSE_OK;
+		}else {
+			
+		}
+	}
+	
+}
+*/
+static int lept_parse_array(lept_value *val, lept_context *text) {
+	assert(val != NULL && text != NULL);
+	EXPECT(text, '[');
+	lept_parse_whitespace(text);
+	if(*text->json == ']') {
+		text->json++;
+		val->type = JSON_ARR;
+		val->u.arr.sz = 0;
+		val->u.arr.e = NULL;
+		return LEPT_PARSE_OK;
+	}
+	size_t sz = 0, i;
+	int ret;
+	lept_value *fail_val;
+	for(;;) {
+		lept_value temp;
+		LEPT_INIT(temp);  //这里不能复用同一个临时变量，因为这个是结构体，结构体的大小和最小的元素有关系，并且是共用同一块内存的
+		if((ret=lept_parse_value(&temp, text)) != LEPT_PARSE_OK) {
+			break;
+		}
+		lept_parse_whitespace(text);
+		memcpy(context_push(text, sizeof(lept_value)), (void *)&temp, sizeof(lept_value));
+		sz++;
+		//lept_free(&temp);这里不能释放这个变量，要是释放掉了，那字符串会出问题。在lept_free中添加释放数组的逻辑
+		if(*text->json == ',') {
+			text->json++;
+		}else if(*text->json == ']') {
+			text->json++;
+			val->type = JSON_ARR;
+			val->u.arr.sz = sz;
+			val->u.arr.e = (lept_value *)malloc(sizeof(lept_value) * sz);
+			memcpy((void *)val->u.arr.e, context_pop(text, sz * sizeof(lept_value)), sz * sizeof(lept_value));
+			return LEPT_PARSE_OK;
+		}else {
+			ret = LEPT_PARSE_MISS_COMMA_OR_SQUARE_BRACKET;
+			break;
+		}
+	}
+	for(i = 0; i < sz ; i++) {
+		fail_val = (lept_val *)context_pop(text, sizeof(lept_value));
+		lept_free(fail_val);
+	}	
+	return ret;
+}

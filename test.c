@@ -93,6 +93,9 @@ static void test_parse_string() {
 	TEST_STRING("0xE20x820xACabc", "\"\\U20ACabc\"");
 }
 
+static void test_parse_arr() {
+	
+}
 
 static void test_access_string() {
 	TEST_ACCESS_STRING("shixiaoxiao", 11);
@@ -107,6 +110,7 @@ static void test_access_number() {
 	EXPECT_EQ_DOUBLE(123.345, lept_get_number(number));
 	lept_free(number);
 }
+
 static void test_parse_invalid() {
 	TEST_ERROR(LEPT_PARSE_INVALID_VALUE, "dfs");
 	TEST_ERROR(LEPT_PARSE_INVALID_VALUE, "nul");
