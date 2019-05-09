@@ -39,7 +39,7 @@ static int test_pass  = 0;
 		EXPECT_EQ_INT(LEPT_PARSE_OK, lept_value_parse(&val_str, json_str));\
 		EXPECT_EQ_STRING(expect, lept_get_string(val_str), lept_get_string_len(val_str));\
 		EXPECT_EQ_INT(JSON_STR, lept_get_type(val_str));\
-		lept_free(&val_str);
+		lept_free(&val_str);\
 	}while(0)
 		
 #define TEST_ERROR(error, json_val)\
@@ -94,7 +94,14 @@ static void test_parse_string() {
 }
 
 static void test_parse_arr() {
-	
+	lept_value json_arr;
+	LEPT_INIT(&json_arr);
+	EXPECT_EQ_INT(LEPT_PARSE_OK, lept_parse(&json_arr, "[null, "123", 123, false, [1,2,3]]"));
+	EXPECT_EQ_INT(LEPT_PARSE_OK, lept_get_type(json_arr));
+	EXPECT_EQ_INT(5, lept_get_array_size());
+	EXPECT_EQ_INT(JSON_NONE, lept_get_type(*(lept_get_array_elem(json_arr, 0))));
+	EXPECT_EQ_STRING("123", lept_get_string(*(lept_get_array_elem(json_arr, 1))));
+	lept_free(&json_arr);
 }
 
 static void test_access_string() {
@@ -104,7 +111,7 @@ static void test_access_string() {
 
 static void test_access_number() {
 	lept_value number;
-	lept_init(&number);
+	LEPT_INIT(&number);
 	lept_set_string(&number, "shi", 3);
 	lept_set_number(&number, 123.345);
 	EXPECT_EQ_DOUBLE(123.345, lept_get_number(number));

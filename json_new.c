@@ -146,7 +146,8 @@ void lept_set_number(lept_value *val, const double n) {
 
 //编写stack_push和stack_pop两个函数的时候，不用考虑lept_value_string怎么实现，编写通用型
 //这样写不太好，要是压入字符，还要传入参字符的指针，可以省略第二个参数，在函数中将栈顶更新，
-//但是返回的是旧的栈顶，在写两个辅助的宏函数，对栈赋值
+//但是返回的是旧的栈顶，这样的好处是在context_push之后，可以调用lept_parse_value对刚才分配的空间
+//进行初始化。在写两个辅助的宏函数，对栈赋值 
 //static void *context_push(lept_context *text, const char *str, size_t len) { 
 static void *context_push(lept_context *text, size_t len) {
 	assert(text!=NULL && len > 0);
@@ -449,12 +450,12 @@ int lept_parse(lept_value *val, const char *json_val) {
 		if(*(text.json) != '\0') ret = LEPT_PARSE_ROOT_NOT_SINGULAR;
 	}
 	assert(text.top == 0);//解析完成之后，top应该为0了
-	free(text.stack);
+	free(text.stack);   //这里也要释放
 	return ret;
 }
 
-
 void lept_free(lept_value *val) {
+	size_t i = 0;
 	assert(val!=NULL);
 	if(val->type == JSON_STR) {   //因为这里要判断val的类型，如果创建一个lept_value变量的时候，应该先将变量初始化为NONE。
 		if(val->u.s.str) {   		//这个宏要写在头文件中。
@@ -462,12 +463,10 @@ void lept_free(lept_value *val) {
 			free(val->u.s.str);
 		}
 	}else if(val->type === JOSN_ARR) {
-		if(val->u.arr.e) {
-			size_t i = 0;
-			for(i = 0; i < val->u.arr.sz; i++) {
-				lept_free(val->u.arr.e + i);
-			}
+		for(i = 0; i < val->u.arr.sz; i++) {
+			lept_free(val->u.arr.e + i);
 		}
+		free(val->u.arr.e);  //注意这个不能忘了
 	}
 	val->type == JSON_NONE;
 }
@@ -537,6 +536,9 @@ static int lept_parse_array(lept_value *val, lept_context *text) {
 	
 }
 */
+
+//在解析数组的时候，text中的栈不光存储已经解析过的lept_value元素 还可能会存储解析json的值，但是没有关系
+//因为每次解析string的时候，均会将内容弹出来。并不影响存储lept_value元素。后面解析object也是同样道理
 static int lept_parse_array(lept_value *val, lept_context *text) {
 	assert(val != NULL && text != NULL);
 	EXPECT(text, '[');
@@ -551,6 +553,10 @@ static int lept_parse_array(lept_value *val, lept_context *text) {
 	size_t sz = 0, i;
 	int ret;
 	lept_value *fail_val;
+	//还有一种做法是，每次解析一个元素的时候，先分配空间，也就是进行context_push操作，然后在以该
+	//变量调用lept_parse_value函数。这种做法看似不错其实有bug。因为在lept_parse_value函数中可能会解析字符串
+	//或者数组以及object,解析这些值类型都会用到栈的，并且给先前分配的空间赋值是在解析完这些元素之后的，所以会出现
+	//解析数组字符串object的时候会造成栈重新分配空间从而造成指向预分配的指针称为悬挂指针。
 	for(;;) {
 		lept_value temp;
 		LEPT_INIT(temp);  //这里不能复用同一个临时变量，因为这个是结构体，结构体的大小和最小的元素有关系，并且是共用同一块内存的
@@ -563,6 +569,7 @@ static int lept_parse_array(lept_value *val, lept_context *text) {
 		//lept_free(&temp);这里不能释放这个变量，要是释放掉了，那字符串会出问题。在lept_free中添加释放数组的逻辑
 		if(*text->json == ',') {
 			text->json++;
+			lept_parse_whitespace(text);
 		}else if(*text->json == ']') {
 			text->json++;
 			val->type = JSON_ARR;
@@ -581,3 +588,5 @@ static int lept_parse_array(lept_value *val, lept_context *text) {
 	}	
 	return ret;
 }
+
+size_t  lept_get_obj_size(const lept_value *)
