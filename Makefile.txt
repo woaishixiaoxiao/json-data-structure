@@ -1,0 +1,10 @@
+CFLAGS := -g -O2 -Wall
+SOURCE := json_new.c
+CC     := gcc
+SHARE  := -fPIC -shared -o
+TARGET := libleptjson.so
+$(TARGET) : $(SOURCE)
+	$(cc) $(SHARE) $@ $(SOURCE)
+.PHONE: clean
+clean:
+	rm -f $(TARGET)
