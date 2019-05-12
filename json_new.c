@@ -2,6 +2,7 @@
 #include<stdio.h>
 #include<stdlib.h>
 #include<string.h>
+#include<math.c>
 typedef struct {
 	const char *json;
 	char *stack;
@@ -13,7 +14,7 @@ typedef struct {
 #define PUTC(text, ch)      do{*(char *)context_push(text, sizeof(char)) = ch;}while(0)
 #define PUTS(text, str, len)     do{strncpy(context_push(text, len), str, len);}while(0)
 #define STRING_ERROR(error) do{text->top = head;return error;}while(0)
-
+#define DOUBLE_EQ(left, right) (fabs(left) - fabs(right) > (-1e-8) || fabs(left) - fabs(right) < (1e-8))
 static int   lept_parse_null(lept_value *, lept_context *);//想将一个函数固定到某一个源文件中一是不要写到头文件中二是声明为static
 static int   lept_parse_true(lept_value *, lept_context *);
 static int   lept_parse_false(lept_value *, lept_context *);
@@ -33,7 +34,8 @@ static int   lept_stringfy_value(const lept_value *, lept_context *);
 static int   lept_stringfy_simple(lept_context *, const char *, size_t);
 static int   lept_stringfy_string(lept_value *, lept_context *);
 static int   lept_stringfy_arr(const lept_value *, lept_context *);
-
+static int   lept_is_equal_arr(const lept_value *, const lept_value *)
+static int   lept_is_equal_obj(const lept_value *, const lept)
 
 json_e lept_get_type(lept_value val) {
 	return val.type;
@@ -645,6 +647,23 @@ static int lept_parse_obj_key(lept_member *m, lept_context *text) {
 	return ret;
 }
 
+int lept_find_obj_index(const lept_value *v, const char *key, size_t len) {
+	assert(v != NULL && v->type == JSON_OBJ && key != NULL);
+	size_t sz = v->u.obj.sz;
+	size_t i;
+	lept_member *m = v->u.obj.m;
+	for(i = 0; i < sz; i++) {
+		if(len == m[i].len && strncmp(m[i].s, key, len) == 0) {
+			return i;
+		}
+	}
+	return LEPT_OBJ_KEY_NOT_EXIST;
+}
+const lept_value *lept_find_obj_value(const lept_value *v, const char *key, size_t len) {
+	int index = lept_find_obj_index(v, key, ken);
+	index != LEPT_OBJ_KEY_NOT_EXIST? return &v->u.obj.m[index].v : NULL;
+}
+
 static int lept_parse_obj(lept_value *val, lept_context *text) {
 	assert(val != NULL && text != NULL);
 	int ret;
@@ -826,7 +845,7 @@ static int lept_stringfy_value(const lept_value *v, lept_context *c) {
 		case JSON_FALSE  : return lept_stringfy_simple(v, "false", 5);
 		case JSON_TRUE   : return lept_stringfy_simple(v, "true", 4);
 		case JSON_NUM    : return lept_stringfy_number(v, c);
-		case JSON_STRING : return lept_stringfy_string(v, c);
+		case JSON_STR 	 : return lept_stringfy_string(v, c);
 		case JSON_ARR    : return lept_stringfy_arr(v, c);
 		case JSON_OBJ    : return lept_stringfy_obj(v, c);
 	}
@@ -852,3 +871,189 @@ int lept_stringfy(const lept_value *v, char **json, size_t &len) {
 	}
 	return ret;
 }
+
+static int lept_is_equal_arr(const lept_value *lhs, const lept_value *rhs) {
+	assert(lhs != NULL && rhs != NULL);
+	assert(lhs->type == JSON_ARR && rhs->type == JSON_ARR);
+	size_t lhs_sz, rhs_sz, i;
+	lhs_sz = lhs->u.arr.sz;
+	rhs_sz = rhs->u.arr.sz;
+	if( lhs_sz != rhs_sz ) {
+		return 0;
+	}
+	for( i = 0; i < lhs_sz; i++) {
+		if(!lept_is_equal(lhs->u.arr.e[i], rhs->u.arr.e[i])) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+static int lept_is_equal_obj(const lept_value *lhs, const lept_value *rhs) {
+	assert(lhs != NULL && rhs != NULL);
+	assert(lhs->type == JSON_OBJ && rhs->type == JSON_OBJ);
+	size_t i, j;
+	if(lhs->u.obj.sz != rhs->u.obj.sz) return 0;
+	/*下面是不对的，因为键值对是无序的 假设键是不重复的。
+	for(i = 0; i < lhs->u.obj.sz; i++) {
+		if(lhs->u.obj.m[i].len != rhs->u.obj.m[i].len || strncmp(lhs->u.obj.m[i].s, rhs->u.obj.m[i].s, lhs->u.obj.m[i].len) != 0) {
+			return 0;
+		}
+		if(!lept_is_equal(&lhs->u.obj.m[i].v, &rhs->u.obj.m[i].v)) {
+			return 0;
+		}	
+	}*/
+	for(i = 0; i < lhs->u.obj.sz; i++) {
+		j = lept_find_obj_index(rhs, lhs->u.obj.m[i].s, lhs->u.obj.m[i].len);
+		if(!j) {
+			return 0;
+		}
+		if(lhs->u.obj.m[i].len != rhs->u.obj.m[j].len || strncmp(lhs->u.obj.m[i].s, rhs->u.obj.m[j].s, lhs->u.obj.m[i].len) != 0) {
+			return 0;
+		}
+		if(!lept_is_equal(&lhs->u.obj.m[i].v, &rhs->u.obj.m[j].v)) {
+			return 0;
+		}
+	}
+	return 1;
+}
+int lept_is_equal(const lept_value *lhs, const lept_value *rhs) {
+	assert(lhs != NULL && rhs != NULL);
+	if(lhs->type != rhs->type) {
+		return 0;
+	}
+	json_e type = lhs->type;
+	switch(type) {
+		/*
+		case JSON_NONE : 
+		case JSON_FALSE:
+		case JSON_TRUE : return 1;
+		这里上述三个默认返回1就行了
+		*/
+		case JSON_NUM  : return DOUBLE_EQ(lhs->u.num, rhs->u.num);
+		case JSON_STR  : {
+			return (lhs->u.s.len == rhs->u.s.len) && 
+				strncmp(lhs->u.s.str, rhs->u.s.str, lhs->u.s.len) == 0;
+		}
+		case JOSN_ARR  : return lept_is_equal_arr(lhs, rhs);
+		case JSON_OBJ  : return lept_is_equal_obj(lhs, rhs);
+		default 	   : return 1;
+	}
+}
+
+void lept_copy(lept_value *dst, const lept_value *src) {
+	assert(dst != NULL && src != NULL && dst != src);//判断下src和dst不相等 因为下面用到了memcpy 所以要对外来的进行assert
+	size_t i;
+	switch(src->type) {
+		case JSON_STR : lept_set_val_str(dst, src->u.s.str, src->u.s.len); break;
+		case JSON_ARR : {
+			lept_free(dst);
+			dst->u.arr.e = (lept_value *)malloc(src->u.arr.sz * sizeof(lept_value));
+			dst->u.arr.sz = src->u.arr.sz;
+			for(i = 0; i < dst->u.arr.sz; i++) {
+				LEPT_INIT(&dst->u.arr.e[i]);
+				lept_copy(dst->u.arr.e[i], src->u.arr.e[i]);
+			}
+			break;
+		}
+		case JSON_OBJ : {
+			lept_free(dst);
+			dst->u.obj.m = (lept_member *)malloc(src->u.obj.sz * sizeof(lept_member));
+			dst->u.obj.sz = src->u.obj.sz;
+			for(i = 0; i < dst->u.obj.sz; i++) {
+				LEPT_INIT(&dst->u.obj.m[i].v);
+				dst->u.obj.m[i].len = dst->u.obj.m[i].len;
+				dst->u.obj.m[i].s = (char *)malloc((dst->u.obj.m[i].len + 1) * sizeof(char)); 
+				memcpy(dst->u.obj.m[i].s, src->u.obj.m[i].s, dst->u.obj.m[i].len + 1);
+				lept_copy(&dst->u.obj.m[i].v, &src->u.obj.m[i].v);
+			}
+			break;
+		}
+		default       : {
+			lept_free(dst);
+			memcpy(dst, src, sizeof(lept_value));
+		}
+	}
+}
+
+/*
+这么写不太好 目的是为了接收src的资源 而不是使src置空
+void lept_move(lept_value **dst, lept_value **src) {
+	assert(dst != NULL && src != NULL && dst != src);
+	lept_free(dst);
+	*dst = *src;
+	
+}
+*/
+
+void lept_move(lept_value *dst, lept_value *src) {
+	assert(dst != NULL && src != NULL && dst != src);
+	lept_free(dst);
+	memcpy(dst, src, sizeof(lept_value));
+	LEPT_INIT(src);
+}
+
+void lept_swap(lept_value *dst, lept_value *src) {
+	assert(dst != NULL && src != NULL);
+	lept_value temp;
+	if(dst != src) {  //这里在这个判断一下 但是允许相等
+		memcpy(&temp, dst, sizeof(lept_value));
+		memcpy(dst, src, sizeof(lept_value));
+		memcpy(src, &temp, sizeof(lept_value));
+	}
+}
+
+void lept_set_array(lept_value *v, size_t capacity) {
+	assert(v != NULL && capacity >= 0);
+	v->type = JSON_ARR;
+	v->u.arr.capacity = capacity;
+	v->u.arr.sz = 0;
+	v->u.arr.e = (capacity != 0 ? (lept_value *)malloc(capacity * sizeof(lept_value)) : NULL);
+}	
+
+void lept_get_array_capacity(lept_value *v) {
+	assert(v != NULL && v->type == JSON_ARR);
+	return v->u.arr.capacity;
+}
+
+void lept_reserve_array(lept_value *v, size_t capacity) {
+	assert(v != NULL && v->type == JSON_ARR && capacity > v->u.arr.capacity);
+	v->u.arr.capacity = capacity;
+	v->u.arr.e = (lept_value *)realloc((void *)v->u.arr.e, capacity);
+	assert(v->u.arr.e != NULL);
+}
+
+void lept_shrink_array(lept_value v*, size_t capacity) {
+	assert(v != NULL && v->type == JSON_ARR && capacity < v->u.arr.capacity);
+	v->u.arr.capacity = capacity;
+	v->u.arr.e = (lept_value *)realloc((void *)v->u.arr.e, capacity);
+	assert(v->u.arr.e != NULL);
+}
+
+lept_value *lept_push_back_arr_elem(lept_value *arr) {
+	assert(arr != NULL && arr->type == JSON_ARR);
+	/*sz = lepe_get_array_sz(*arr);
+	capacity = lept_get_array_capacity(arr);
+	*/
+	//虽然提供了获取arr size以及arr capacity函数，但是内部没有必要调用
+	if(arr->u.arr.capacity == arr->u.arr.sz) {
+		//capacity += capacity >> 1;这里没有考虑为0的情况
+		lept_reserve_array(arr, arr->u.arr.capacity == 0? 1 : arr->u.arr.capacity >> 1);  
+	}
+	LEPT_INIT(&arr->u.arr.e[sz]);
+	return &arr->u.arr.e[arr->u.arr.sz++];
+}
+
+void lept_pop_back_arr_elem(lept_value *arr) {
+	assert(arr != NULL && arr->type == JSON_ARR && arr->u.arr.sz > 0);
+	lept_free(&arr->u.arr.e[--arr->u.arr.sz]);
+}	
+
+void lept_set_object(lept_value *v, size_t capacity) {
+	assert(v != NULL && capacity >= 0);
+	v->type = JSON_OBJ;
+	v->u.obj.capacity = capacity;
+	v->u.obj.sz = 0;
+	v->u.obj.m = (capacity != 0 ? (lept_member *)malloc(capacity * sizeof(lept_member)) : NULL);
+}
+

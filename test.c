@@ -18,8 +18,8 @@ static int test_pass  = 0;
 	}while(0)   //这里没有加;号 是要在后面加
 
 #define EXPECT_EQ_INT(expect, actual) EXPECT_EQ_BASE(expect==actual, expect, actual, %d)
-#define EXPECT_EQ_DOUBLE(expect, actual) EXPECT_EQ_BASE(expect==actual, expect, actual, %f)
-#define EXPECT_EQ_STRING(expect, ptr, len) EXPECT_EQ_BASE(strncmp(expect, ptr, len), expect, ptr, %s)
+#define EXPECT_EQ_DOUBLE(expect, actual) EXPECT_EQ_BASE(expect==actual, expect, actual, %f)//浮点数直接用==比较不好但是这里不做处理了
+#define EXPECT_EQ_STRING(expect, ptr, len) EXPECT_EQ_BASE(strncmp(expect, ptr, len) == 0, expect, ptr, %s)
 
 //这里可以定义变量，因为用do{}while包围起来的作用域
 #define TEST_NUMBER(expect, json_num) \
@@ -108,7 +108,7 @@ static void test_parse_string() {
 
 static void test_parse_object() {
 	lept_value val;
-	LEPT_INIT(&val);
+	LEPT_INIT(&val);//使用lept_value的时候先初始化，因为用完一个变量可能会进行释放，这时候需要根据type进行lept_free
 	EXPECT_EQ_INT(LEPT_PARSE_OK, lept_parse(&val, "{\"123\" : \"shi\", \"name\" : null}"));
 	EXPECT_EQ_INT(2, lept_get_obj_size(&val));
 	EXPECT_EQ_INT(JSON_STR, lept_get_type(*lept_get_obj_value(&val, 0)));
