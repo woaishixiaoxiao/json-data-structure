@@ -11,8 +11,9 @@ typedef enum {
 } json_e;
 typedef struct lept_value lept_value;//前向声明
 typedef struct lept_member {
-	char *s;size_t len;
-	lept_value *v;
+	char *s;
+	size_t len;
+	lept_value v;
 }lept_member;
 typedef struct {
 	json_e type;
@@ -22,7 +23,6 @@ typedef struct {
 		struct {char *str;size_t len}s;    //这里需要保存str的长度，一个是为了更方便的得出字符串的长度，另外一个重要原因是
 		struct {lept_value *e, size_t sz}arr;//json字符串中的\U0000这个代表的是'\0'，所以char *str不是以空结尾的，打印的时候也不能用string.h中的API
 		struct {lept_member *m, size_t sz}obj;
-		object obj;
 	}u;
 }lept_value;
 //定义错误值，让我们容易定位错误。
@@ -42,6 +42,7 @@ typedef enum {
     LEPT_PARSE_MISS_KEY,
     LEPT_PARSE_MISS_COLON,
     LEPT_PARSE_MISS_COMMA_OR_CURLY_BRACKET,
+	LEPT_PARSE_STRINGFY_OK
 }resId;
 typedef unsigned int BOOL;
 typedef unsigned int U32;
@@ -61,7 +62,8 @@ const lept_value *lept_get_array_elem(lept_value, size_t);  //相关get函数参
 
 //obj用动态数组数据结构表示了，没有用哈希结构，可以通过数组下标来访问  测试证明 const char *p 指向一个char数组，返回的p + i，不是const类型
 size_t       lept_get_obj_size(const lept_value *);
-const char * lept_get_obj_key(const lept_value *， size_t index);      //从解析Obj开始参数都用lept_value*
-size_t  lept_get_obj_key_len(const lept_value *, size_t index);
-const lept_value * lept_get_obj_value(const lept_value *, size_t index);
+const char * lept_get_obj_key(const lept_value *， size_t);      //从解析Obj开始参数都用lept_value*
+size_t  	 lept_get_obj_key_len(const lept_value *, size_t);
+const 	   	 lept_value * lept_get_obj_value(const lept_value *, size_t);
+int          lept_stringfy(const lept_value *, char **, size_t *);
 

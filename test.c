@@ -54,11 +54,24 @@ static int test_pass  = 0;
 		lept_value val;\
 		LEPT_INIT(val);\
 		lept_set_val_str(val, str, len);\
-		EXPECT_EQ_STRING(str, lept_get_string(val));\
+		EXPECT_EQ_STRING(str, lept_get_string(val), len);\
 		EXPECT_EQ_INT(len, lept_get_string_len(val));\
 		lept_free(&val);\
 	}while(0)
 
+#define TEST_ROUNDTRIP(json) \
+	do{\
+		lept_value v;\
+		char *s;\
+		size_t len;\
+		LEPT_INIT(&v);\
+		lept_parse(&v, json);\
+		EXPECT_EQ_INT(LEPT_PARSE_OK, lept_stringfy(&v, &s, &len));\
+		EXPECT_EQ_STRING(json, s, len);\
+		free(s);\
+		lept_free(&v);\
+	}while(0)
+		
 static void test_parse_null() {
 	lept_value val_null;
 	//json值定义是  JSON-text = ws value ws  ws为单个或多个空格 制表 回车 换行组成的 所以要有提取value的一步
@@ -93,6 +106,15 @@ static void test_parse_string() {
 	TEST_STRING("0xE20x820xACabc", "\"\\U20ACabc\"");
 }
 
+static void test_parse_object() {
+	lept_value val;
+	LEPT_INIT(&val);
+	EXPECT_EQ_INT(LEPT_PARSE_OK, lept_parse(&val, "{\"123\" : \"shi\", \"name\" : null}"));
+	EXPECT_EQ_INT(2, lept_get_obj_size(&val));
+	EXPECT_EQ_INT(JSON_STR, lept_get_type(*lept_get_obj_value(&val, 0)));
+	EXPECT_EQ_STRING("123", lept_get_obj_key(&val, 0), lept_get_obj_key_len(&val, 0));
+	lept_free(&val);
+}
 static void test_parse_arr() {
 	lept_value json_arr;
 	LEPT_INIT(&json_arr);
@@ -159,6 +181,36 @@ static void test_parse_invalid_unicode_surrogate() {
     TEST_ERROR(LEPT_PARSE_INVALID_UNICODE_SURROGATE, "\"\\uD800\\uE000\"");
 }
 
+static void test_stringfy_array() {
+	TEST_ROUNDTRIP("[]");
+    TEST_ROUNDTRIP("[null,false,true,123,\"abc\",[1,2,3]]");
+}
+
+static void test_stringfy_number() {
+	TEST_ROUNDTRIP("1.234e-20");
+	TEST_ROUNDTRIP("1.0000000000000002"); /* the smallest number > 1 */
+}
+
+static void test_stringfy_object() {
+	TEST_ROUNDTRIP("{}");
+    TEST_ROUNDTRIP("{\"n\":null,\"f\":false,\"t\":true,\"i\":123,\"s\":\"abc\",\"a\":[1,2,3],\"o\":{\"1\":1,\"2\":2,\"3\":3}}");
+}
+
+static void test_stringfy_string() {
+	TEST_ROUNDTRIP("\"Hello\\nWorld\"");
+	TEST_ROUNDTRIP("\"\\\" \\\\ / \\b \\f \\n \\r \\t\"");
+}
+
+static void test_stringfy() {
+	TEST_ROUNDTRIP("null");
+	TEST_ROUNDTRIP("true");
+	TEST_ROUNDTRIP("false");
+	test_stringfy_number();
+	test_stringfy_string();
+	test_stringfy_array();
+	test_stringfy_object();
+}
+
 static void test_parse() {
 	test_parse_null();
 	test_parse_bol();
@@ -168,6 +220,11 @@ static void test_parse() {
 	test_parse_number();
 	test_parse_string();
 	test_access_string();
+	test_parse_invalid_string_escape();
+	test_parse_invalid_unicode_surrogate();
+	test_parse_arr();
+	test_parse_object();
+	test_stringfy();
 }
 
 int main(int argc, char* argv[])

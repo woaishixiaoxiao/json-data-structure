@@ -8,11 +8,12 @@ typedef struct {
 	size_t sz, top;
 }lept_context;
 
-
+#define LEPT_PARSE_STACK_INIT_SIZE 256
 #define EXPECT(text, ch)    do{ assert((text)->json==(ch));(text)->json++;}while(0)
 #define PUTC(text, ch)      do{*(char *)context_push(text, sizeof(char)) = ch;}while(0)
-#define PUTS(text, str)     do{strncpy(context_push(text, len), str, len);}while(0)
+#define PUTS(text, str, len)     do{strncpy(context_push(text, len), str, len);}while(0)
 #define STRING_ERROR(error) do{text->top = head;return error;}while(0)
+
 static int   lept_parse_null(lept_value *, lept_context *);//想将一个函数固定到某一个源文件中一是不要写到头文件中二是声明为static
 static int   lept_parse_true(lept_value *, lept_context *);
 static int   lept_parse_false(lept_value *, lept_context *);
@@ -24,8 +25,16 @@ static void *context_push(lept_context *text, size_t len);
 static void *context_pop(lept_context *text, size_t len);
 static char *lept_parse_hex4(char *, unsigned *);
 static char *lept_encode_UTF8(lept_context *, unsigned);
-static int   lept_parse_string_raw(lept_value *, lept_context *, char *, size_t *);
+static int   lept_parse_string_raw(lept_context *, char *, size_t *);
 static int   lept_parse_array(lept_value *, lept_context *);
+static int   lept_parse_obj(lept_value *, lept_context *);
+static int   lept_parse_obj_key(lept_member *, lept_context *);
+static int   lept_stringfy_value(const lept_value *, lept_context *);
+static int   lept_stringfy_simple(lept_context *, const char *, size_t);
+static int   lept_stringfy_string(lept_value *, lept_context *);
+static int   lept_stringfy_arr(const lept_value *, lept_context *);
+
+
 json_e lept_get_type(lept_value val) {
 	return val.type;
 }
@@ -104,13 +113,14 @@ static int lept_parse_value(lept_val *val, lept_context *text) {
 		case '9'  : return lept_parse_number(val, text);
 		case '\"' : return lept_parse_string(val, text);
 		case '['  : return lept_parse_array(val, text);
+		case '{'  : return lept_parse_obj(val, text);
 		case '\0' : return LEPT_PARSE_EXPECT_VALUE;
 		default   : return LEPT_PARSE_INVALID_VALUE;
 	}
 }
 
 double lept_get_number(const lept_value val) {
-	assert(val.type == JSON_NUMBER);
+	assert(val.type == JSON_NUM);
 	return val.u.num;
 }
 /*
@@ -132,7 +142,7 @@ int lept_parse_number(lept_value *val, lept_context *text) {
 		return LEPT_PARSE_INVALID_VALUE;
 	}
 	val->u.num = res;
-	val->type = JSON_NUMBER;
+	val->type = JSON_NUM;
 	//不要忘了将json指针进行修改
 	text->json = endpoint;
 	return LEPT_PARSE_OK;
@@ -263,6 +273,8 @@ UTF-8编码的字节流。我们得到下述转换规则
 2、对于非转义字符
 我们直接将非转义字符的字节流保存到解析结果中去。因为json文本是UTF-8编码的，可能会存在几个字节流表示一个字符的情况，
 我们直接将这些字节流按顺序放到解析中去就好了
+
+注意json解析不涉及到encode decode，都是在encode编码范围内做转变，需要decodde那是其他的操作了
 */
 /*static int lept_parse_string(lept_value *val, lept_context *text) {
 	assert(val!=NULL && text!=NULL);
@@ -345,9 +357,11 @@ UTF-8编码的字节流。我们得到下述转换规则
 }
 */
 
-//对上述函数进行改写
-static int lept_parse_string_raw(lept_value *val, lept_context *text, char *str, size_t *len) {
-	assert(val!=NULL && text!=NULL && str!=NULL && len!=NULL);
+//对上述函数进行改写  改写的原因是 我们后面解析obj的时候，key也是json字符串类型，但是我们不用lept_value保存Key
+//而是用char *s保存key，所以将上述函数拆分成两个函数，一个用来保存解析json字符串，返回str以及len，另一个函数赋值，
+//这样解析obj key的时候，可以复用这个逻辑
+static int lept_parse_string_raw(lept_context *text, char *str, size_t *len) {
+	assert(text!=NULL && str!=NULL && len!=NULL);
 	size_t head = text->top, len;
 	EXPECT(text, '\"');
 	const char * p = text->json;
@@ -407,10 +421,12 @@ static int lept_parse_string_raw(lept_value *val, lept_context *text, char *str,
 				STRING_ERROR(LEPT_PARSE_MISS_QUOTATION_MARK);
 			}
 			default    : { 
-				//unescaped = %x20-21 / %x23-5B / %x5D-10FFFF，这个范围之外的都是不合法的。因为我们上面处理了0x22以及0x5c
-				//这里只要比0x20小就行了。char是unsigned char还是signed char看编译器的实现，如果是signed char保存不了>127
-				//的整数,但是强制转换成unsigned char肯定是>127的，所以无论编译器如果解析char，下面的判断表达式都可以找出
-				//无效的非转义字符
+				//unescaped = %x20-21 / %x23-5B / %x5D-10FFFF，这个范围之外的都是不合法的。
+				//按照上面的定义出现比0x20小的肯定是错误的。而比0x7F大的是合法的。
+				//上述规则意味着，0x20以下的字符全部需要用\U来表示。而大于0x20的即可以用\U表示，也可以用编码表示。
+				//JSON文本一般用UTF8保存，所以上述的编码为UTF8编码表示。
+				//因为我们上面处理了0x22以及0x5c，下面不合法的只需要判断时是否小于0x20。
+				//char是unsigned char还是signed char看编译器的实现。但是我们都是将char强制转化成unsignd char进行比较。
 				if((unsigned char)c < 0x20) {
 					/*只要json字符串不合法，都会有执行下面两个语句，text->top=head是固定的，但是错误码不一定
 					将这两个语句组成宏,这个宏并没有传递text以及head的参数，因为是固定的，只传递了错误码。所以这个宏只限于此函数中使用
@@ -428,7 +444,7 @@ static int lept_parse_string_raw(lept_value *val, lept_context *text, char *str,
 static int lept_parse_string(lept_value *val, lept_context *text) {
 	char *str;
 	size_t len;
-	if( (ret = lept_parse_string_raw(val, text, str, &len)) == LEPT_PARSE_Ok ) {
+	if( (ret = lept_parse_string_raw(text, str, &len)) == LEPT_PARSE_Ok ) {
 		lept_set_val_str(val, str, len);
 	}
 	return ret;
@@ -467,6 +483,12 @@ void lept_free(lept_value *val) {
 			lept_free(val->u.arr.e + i);
 		}
 		free(val->u.arr.e);  //注意这个不能忘了
+	}else if(val->type == JSON_OBJ) {
+		for(i = 0; i < val->u.obj.sz; i++) {
+			free(val->u.obj.m[i].s);
+			lept_free(&(val->u.obj.m[i].v));
+		}
+		free(val->u.obj.m);
 	}
 	val->type == JSON_NONE;
 }
@@ -589,4 +611,244 @@ static int lept_parse_array(lept_value *val, lept_context *text) {
 	return ret;
 }
 
-size_t  lept_get_obj_size(const lept_value *)
+size_t  lept_get_obj_size(const lept_value *v) {
+	assert(v != NULL);
+	return v->u.obj.sz;
+}
+
+const char * lept_get_obj_key(const lept_value *v， size_t index) {
+	assert(v != NULL && index < v->u.obj.sz);
+	return v->u.obj.m[index].s;
+}
+
+size_t  lept_get_obj_key_len(const lept_value *v, size_t index) {
+	assert(v != NULL && index < v->u.obj.sz);
+	return v->u.obj.m[index].len;
+}
+
+const lept_value * lept_get_obj_value(const lept_value *v, size_t index) {
+	assert(v != NULL && index < v->u.obj.sz);
+	return &(v->u.obj.m[index].v);
+}
+
+static int lept_parse_obj_key(lept_member *m, lept_context *text) {
+	assert(m != NULL && text != NULL);
+	char *str;
+	size_t len;
+	int ret;
+	if( (ret = lept_parse_string_raw(text, str, &len)) == LEPT_PARSE_Ok ) {
+		m->k.len = len;
+		m->k.s = (char *)malloc(len * sizeof(char) + 1);
+		memcpy((void *)m->k.s, (void *)str, len);
+		m->k.s[len] = '\0';
+	}
+	return ret;
+}
+
+static int lept_parse_obj(lept_value *val, lept_context *text) {
+	assert(val != NULL && text != NULL);
+	int ret;
+	size_t sz = 0, i;
+	EXPECT(text, '{');
+	lept_parse_whitespace(text);
+	if(*text->json == '}') {
+		text->json++;
+		val->type = JSON_OBJ;
+		val->u.obj.sz = 0;
+		val->u.obj.m = NULL;
+		return LEPT_PARSE_OK;
+	}
+	for(;;) {
+		lept_member kv;
+		LEPT_INIT(&kv.v);
+		if((ret=lept_parse_obj_key(&kv, text)) != LEPT_PARSE_OK) {
+			break;
+		}
+		lept_parse_whitespace(text);
+		if(*text->json != ':') {
+			ret = LEPT_PARSE_MISS_COLON;
+			break;
+		}
+		text->json++;
+		lept_parse_whitespace(text);
+		if((ret=lept_parse_value(&(kv.v), text)) != LEPT_PARSE_OK) {
+			break;
+		}
+		sz++;
+		memcpy(context_push(text, sizeof(lept_member)), (void *)&kv, sizeof(lept_member));
+		lept_parse_whitespace(text);
+		if(*text->json == ',') {
+			text->json++;
+			lept_parse_whitespace(text);
+		}else if(*text->json == '}') {
+			text->json++;
+			val->type = JSON_OBJ;
+			val->u.obj.sz = sz;
+			val->u.obj.m = (lept_member *)malloc(sz * sizeof(lept_member));
+			memcpy((void *)val->u.obj.m, context_pop(text, sz * sizeof(lept_member)), sz * sizeof(lept_member));
+			return LEPT_PARSE_OK;
+		}else {
+			ret = LEPT_PARSE_MISS_COMMA_OR_CURLY_BRACKET;
+			break;
+		}
+	}
+	for(i = 0; i < sz; i++) {
+		lept_member *p = (lept_member *)context_pop(text, sizeof(lept_member));
+		free(p->s);
+		lept_free(&p->v);
+	}
+	return ret;
+}
+
+static int lept_stringfy_simple(lept_context *c, const char *s, size_t len) {
+	assert(s!=NULL && c!=NULL);
+	PUTS(c, s, len);
+	return LEPT_PARSE_STRINGFY_OK;
+}
+
+//上面字符串解析的时候分析过了，json字符串范围是unescaped = %x20-21 / %x23-5B / %x5D-10FFFF
+//解析后的lept_value中保存了UTF-8的编码。包含转义字符以及非转义字符。转义字符包含下面的几种。
+//对于小于0x20的编码（json中是\U），我们需要给他转换成"\UXXXX"的类型，而其他的则不需要。
+/*static int lept_stringfy_string(lept_value *v, lept_context *c) {
+	assert(v != NULL && c != NULL);
+	int i;
+	unsigned char ch;
+	const char *p = v->u.s;
+	PUTC(c, '"');
+	for(i = 0; i < v->u.s.len; i++) {
+		ch = (unsigned char)p[i];
+		switch(ch) {
+			case '\t' : PUTS(c, "\\t", 2); break;
+			case '\b' : PUTS(c, "\\b", 2); break;
+			case '\n' : PUTS(c, "\\n", 2); break;
+			case '\f' : PUTS(c, "\\f", 2); break;
+			case '\r' : PUTS(c, "\\r", 2); break;
+			case '\\' : PUTS(c, "\\\\", 2);break;
+			case '/'  : PUTS(c, "\\/", 2); break;
+			case '"'  : PUTS(C, "\\\"", 2);break;
+			default   : {
+				if(ch < 0x20) {
+					snprintf(context_push(c, 6), 6, "\u%04x", (unsigned char)ch);
+				}else {
+					PUTC(c, ch);
+				}
+			}
+		}
+	}
+	PUTC(c, '"');
+	return LEPT_PARSE_STRINGFY_OK;
+}*/
+
+//对上面的函数进行重构。上面的会大量调用PUTS函数，而这个函数是比较耗时间的，另外snprintf这个函数处理也比较费时间
+//可以自己写一个进制转化为字符串的函数 就是时空转换的问题。
+//这里参数不要写成后面的两个因为到时候解析obj的时候要解析key。static int lept_stringfy_string(lept_value *v, lept_context *c)
+static int lept_stringfy_string(lept_context *c, const char *s, size_t len) {
+	assert(c != NULL && s != NULL);
+	static char *hex[] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E'};
+	size_t i, sz;
+	unsigned char ch;
+	//c->stack = (char *)malloc(sizeof(char) * c->sz);这里不要这么写 因为这个对单纯解析字符串是有效的，但是要解析
+	//数组或者obj是和所有的元素用一个c，这样子就有问题了要用context_push函数
+	char *q, *head;
+	q = head = context_push(c, sz = len * 6 + 2);
+	*q++ = '"';
+	for(i = 0; i < len; i++) {
+		ch = (unsigned char)s[i];
+		switch(ch) {
+			case '\t' : *q++ = '\\'; *q++ = 't';break;
+			case '\b' : *q++ = '\\'; *q++ = 'b';break;
+			case '\n' : *q++ = '\\'; *q++ = 'n';break;
+			case '\f' : *q++ = '\\'; *q++ = 'f';break;
+			case '\r' : *q++ = '\\'; *q++ = 'r';break;
+			case '\\' : *q++ = '\\'; *q++ = '\\';break;
+			case '/'  : *q++ = '\\'; *q++ = '/';break;
+			case '"'  : *q++ = '\\'; *q++ = '"';break;
+			default   : {
+				if(ch < 0x20) {
+					//snprintf(context_push(c, 6), 6, "\u%04x", (unsigned char)ch);
+					*q++ = '\\';*q++ = 'u';*q++ = '0';*q++ = '0';
+					*q++ = hex[ch>>4];
+					*q++ = hex[ch&0x0F];
+				}else {
+					*q++ = ch;
+				}
+			}
+		}
+	}
+	*q++ = '"';
+	c->top -= size - (q - head);
+	return LEPT_PARSE_STRINGFY_OK;
+}
+
+static int lept_stringfy_arr(const lept_value *v, lept_context *c) {
+	assert(v != NULL && c != NULL);
+	assert(v->type == JSON_ARR);
+	size_t i;
+	PUTC(c, '[');
+	for(i = 0; i < v->u.arr.sz; i++) {
+		if(i > 0) {
+			PUTC(c, ',');
+		}
+		lept_stringfy_value(&v->u.arr.e[i], c);
+	}
+	PUTC(c, ']');
+	return LEPT_PARSE_STRINGFY_OK;
+}
+
+static int lept_stringfy_obj(const lept_value *v, lept_context *c) {
+	assert(v != NULL && c != NULL);
+	assert(v->type == JSON_OBJ);
+	size_t i;
+	PUTC(c, '{');
+	for(i = 0; i < v->u.obj.sz; i++) {
+		if(i > 0) {
+			PUTC(c, ',');
+		}
+		lept_stringfy_string(c, v->u.obj.m[i].s, v->u.obj.m[i].len);
+		PUTC(c, ':');
+		lept_stringfy_value(&v->u.obj.m[i].v, c);
+	}
+	PUTC(c, '}');
+	return LEPT_PARSE_STRINGFY_OK;
+}
+
+static int lept_string_number(const lept_value *v, lept_context *c) {
+	assert(v != NULL && v->type == JSON_NUM && c != NULL);
+	c->top -= 32 - sprintf(context_push(c, 32), "%.17g", v->u.num);//%g是可以以最小的宽带输出浮点数，就是根据浮点数选择以小数输出还是以科学计数法输出，17是可以输出后面17个小数
+	return LEPT_PARSE_STRINGFY_OK;
+}
+
+static int lept_stringfy_value(const lept_value *v, lept_context *c) {
+	assert(v!=NULL && c!=NULL);
+	json_e type = v->type;
+	switch(type) {
+		case JSON_NONE   : return lept_stringfy_simple(c "null", 4);
+		case JSON_FALSE  : return lept_stringfy_simple(v, "false", 5);
+		case JSON_TRUE   : return lept_stringfy_simple(v, "true", 4);
+		case JSON_NUM    : return lept_stringfy_number(v, c);
+		case JSON_STRING : return lept_stringfy_string(v, c);
+		case JSON_ARR    : return lept_stringfy_arr(v, c);
+		case JSON_OBJ    : return lept_stringfy_obj(v, c);
+	}
+}
+
+int lept_stringfy(const lept_value *v, char **json, size_t &len) {
+	assert(v!=NULL);
+	lept_context c;
+	int ret;
+	c.stack = (char *)malloc(LEPT_PARSE_STACK_INIT_SIZE * sizeof(char));
+	c.top = 0; 
+	c.sz = LEPT_PARSE_STACK_INIT_SIZE;
+	ret = lept_stringfy_value(v, &c);
+	if(ret == LEPT_PARSE_STRINGFY_OK) {
+		PUT(c.stack, '\0');
+		*json = c.stack
+		if(len!=NULL) {
+			*len = c.top;
+		}
+	}else {
+		free(c.stack);
+		*json = NULL;
+	}
+	return ret;
+}
